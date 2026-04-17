@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iphoto2youtube-cli"
+version = "0.1.0"
+description = "Python CLI MVP scaffold for private YouTube uploads with metadata generation."
+readme = "docs/python-cli-mvp-task-list.md"
+requires-python = ">=3.11"
+dependencies = [
+  "google-api-python-client>=2.170.0",
+  "google-auth-httplib2>=0.2.0",
+  "google-auth-oauthlib>=1.2.0",
+]
+
+[project.scripts]
+iphoto2youtube = "iphoto2youtube_cli.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

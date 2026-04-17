@@ -1,0 +1,35 @@
+.venv/
+.build/
+.iphoto2youtube/
+.swiftpm/
+.xcode-derived-data/
+.DS_Store
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.xcuserstate
+xcuserdata/
+7972303655671775538215r3.mov
+AGENTS.md
+
+# OAuth credentials and tokens
+client_secret.json
+token.json
+**/client_secret.json
+**/token.json
+
+# Local app data
+*.db
+*.sqlite
+*.sqlite3
+*.csv
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Local docs assets
+docs/Screen Shot/
+iPhoto2YouTube.app/

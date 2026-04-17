@@ -1,0 +1,10 @@
+{
+  "expected_channel": "Sample Channel",
+  "expected_channel_id": "",
+  "default_privacy_status": "private",
+  "default_playlist_privacy_status": "private",
+  "default_library_name": "Local Files",
+  "default_timezone": "JST",
+  "default_offset_time_original": "+09:00",
+  "default_capture_date_source": "manual_input"
+}
