@@ -16,6 +16,8 @@ By using this Application, you are agreeing to be bound by the [**YouTube Terms 
 
 Furthermore, the use of YouTube API Services is subject to the [**Google Privacy Policy**](https://policies.google.com/privacy).
 
+Please also review the application's [**Terms of Service**](https://github.com/HiroPublic/iPhoto2YouTube-en/blob/main/Terms%20of%20Service.md).
+
 ## **3\. Data Collection and Usage**
 
 ### **What Data We Access**
@@ -47,4 +49,4 @@ Revoking access will immediately prevent the Application from taking any further
 
 ## **6\. Contact Information**
 
-If you have any questions or concerns regarding this Privacy Policy, please refer to the project's [GitHub Repository](https://www.google.com/search?q=https://github.com/HiroPublic/iPhoto2YouTube-en) and open an issue.
+If you have any questions or concerns regarding this Privacy Policy, please refer to the project's [GitHub Repository](https://github.com/HiroPublic/iPhoto2YouTube-en) and open an issue.

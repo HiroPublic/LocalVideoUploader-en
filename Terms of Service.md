@@ -18,7 +18,7 @@ Any violation of the YouTube Terms of Service while using this Application is st
 
 ## **4\. Privacy**
 
-Your privacy is important to us. Please review our **\[Privacy Policy\](\[Insert link to privacy\_policy.md\])**, which explains how the Application handles your data locally. By using the Application, you also acknowledge that your data is subject to the [**Google Privacy Policy**](https://policies.google.com/privacy) when interacting with the YouTube API.
+Your privacy is important to us. Please review our [**Privacy Policy**](https://github.com/HiroPublic/iPhoto2YouTube-en/blob/main/Privacy%20Policy.md), which explains how the Application handles your data locally. By using the Application, you also acknowledge that your data is subject to the [**Google Privacy Policy**](https://policies.google.com/privacy) when interacting with the YouTube API.
 
 ## **5\. User Responsibilities**
 
