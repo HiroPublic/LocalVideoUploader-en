@@ -1,16 +1,10 @@
-# iPhoto2YouTube
+# iPhoto2YouTube - YouTube API Usage Documentation
 
 ## 1. Overview
 
 iPhoto2YouTube is a macOS desktop application that allows users to upload videos from their local photo library to their own YouTube channel.
 
 The application is designed for personal use and operates entirely through explicit user interaction.
-
-### Related Documents
-
-- [API Documentation](iPhoto2YouTube_API_Documentation.md): Overview of iPhoto2YouTube API integration and usage.
-- [Privacy Policy](Privacy%20Policy.md): Privacy policy for the application.
-- [Terms of Service](Terms%20of%20Service.md): Terms of service for the application.
 
 ---
 
@@ -113,3 +107,13 @@ The application complies with YouTube API Services policies:
 - Desktop application (not a web service)
 - Personal-use tool
 - Fully user-controlled workflow
+
+---
+
+## 10. Screenshots (Attached Separately)
+
+- Login screen
+- Video selection screen
+- Metadata editing screen
+- Upload confirmation dialog
+- Upload progress screen
