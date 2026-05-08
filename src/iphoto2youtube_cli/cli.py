@@ -214,6 +214,8 @@ def _add_metadata_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--place", help="場所")
     parser.add_argument("--content", help="内容")
+    parser.add_argument("--title", help="YouTube に設定するタイトル。未指定時は自動生成します。")
+    parser.add_argument("--description", help="YouTube に設定する説明欄。未指定時は自動生成します。")
     parser.add_argument("--event-name", help="イベント名")
     parser.add_argument(
         "--participants",

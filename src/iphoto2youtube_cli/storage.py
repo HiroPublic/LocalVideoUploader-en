@@ -132,6 +132,7 @@ CURRENT_QUOTA_COST_BY_OPERATION = {
     "playlistItems.delete": 50,
     "videos.delete": 50,
 }
+API_DATA_RETENTION_DAYS = 30
 
 
 class UploadHistoryRepository:
@@ -146,6 +147,30 @@ class UploadHistoryRepository:
             self._ensure_column(conn, "upload_history", "duration_seconds", "REAL")
             self._ensure_column(conn, "upload_history", "width", "INTEGER")
             self._ensure_column(conn, "upload_history", "height", "INTEGER")
+
+    def purge_expired_api_data(self, *, now: datetime | None = None) -> dict[str, int]:
+        cutoff = (now or datetime.now()) - timedelta(days=API_DATA_RETENTION_DAYS)
+        cutoff_text = cutoff.isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            history_cursor = conn.execute(
+                """
+                DELETE FROM upload_history
+                WHERE uploaded_at < ?
+                """,
+                (cutoff_text,),
+            )
+            quota_cursor = conn.execute(
+                """
+                DELETE FROM api_quota_log
+                WHERE occurred_at < ?
+                """,
+                (cutoff_text,),
+            )
+            conn.commit()
+        return {
+            "history_deleted": int(history_cursor.rowcount or 0),
+            "quota_deleted": int(quota_cursor.rowcount or 0),
+        }
 
     def _ensure_column(
         self,
@@ -661,6 +686,20 @@ class VideoManagementRepository:
             self._ensure_column(conn, "video_management", "duration_seconds", "REAL")
             self._ensure_column(conn, "video_management", "width", "INTEGER")
             self._ensure_column(conn, "video_management", "height", "INTEGER")
+
+    def purge_expired_api_data(self, *, now: datetime | None = None) -> int:
+        cutoff = (now or datetime.now()) - timedelta(days=API_DATA_RETENTION_DAYS)
+        cutoff_text = cutoff.isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM video_management
+                WHERE COALESCE(updated_at, created_at) < ?
+                """,
+                (cutoff_text,),
+            )
+            conn.commit()
+        return int(cursor.rowcount or 0)
 
     def _ensure_column(
         self,

@@ -1237,15 +1237,20 @@ final class AppViewModel: ObservableObject {
         }
 
         let previewItems = drafts.prefix(3).map { draft in
-            let place = draft.place.isEmpty ? commonMetadata.place : draft.place
-            let eventName = draft.eventName.isEmpty ? commonMetadata.eventName : draft.eventName
-            let title = TitlePreviewBuilder.buildTitle(
-                captureDate: draft.captureDate,
-                timezone: commonMetadata.timezone,
-                place: place,
-                eventName: eventName,
-                content: draft.content
-            )
+            let title: String
+            if draft.customTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let place = draft.place.isEmpty ? commonMetadata.place : draft.place
+                let eventName = draft.eventName.isEmpty ? commonMetadata.eventName : draft.eventName
+                title = TitlePreviewBuilder.buildTitle(
+                    captureDate: draft.captureDate,
+                    timezone: commonMetadata.timezone,
+                    place: place,
+                    eventName: eventName,
+                    content: draft.content
+                )
+            } else {
+                title = draft.customTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
             return "- \(title)"
         }
         let remaining = max(drafts.count - previewItems.count, 0)

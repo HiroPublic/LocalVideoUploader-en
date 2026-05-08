@@ -36,6 +36,11 @@ class Application:
         self.paths.support_dir.mkdir(parents=True, exist_ok=True)
         self.history_repo.initialize()
         self.management_repo.initialize()
+        cleanup = self.history_repo.purge_expired_api_data()
+        management_deleted = self.management_repo.purge_expired_api_data()
+        if cleanup["history_deleted"] > 0 or management_deleted > 0:
+            records = self.management_repo.fetch_all_for_ledger()
+            self.ledger_service.export_csv(records, self.paths.ledger_csv)
 
     def auth_status(self) -> CommandResult:
         self.initialize()
@@ -239,6 +244,8 @@ class Application:
         metadata: VideoMetadataInput,
         uploaded_at: datetime | None = None,
     ):
+        if metadata.custom_title:
+            return compose_metadata(metadata, uploaded_at=uploaded_at)
         title_probe = compose_metadata(metadata)
         collision_index = self.history_repo.next_collision_index(title_probe.title_base)
         return compose_metadata(metadata, collision_index=collision_index, uploaded_at=uploaded_at)

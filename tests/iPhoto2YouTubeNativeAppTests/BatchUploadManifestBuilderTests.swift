@@ -10,7 +10,9 @@ final class BatchUploadManifestBuilderTests: XCTestCase {
         let draft = VideoDraft(
             filePath: "/tmp/movie.mov",
             captureDate: Date(timeIntervalSince1970: 0),
-            content: "花見"
+            content: "花見",
+            customTitle: "手動タイトル",
+            customDescription: "手動説明"
         )
         var common = CommonMetadata()
         common.place = "砧公園"
@@ -28,6 +30,8 @@ final class BatchUploadManifestBuilderTests: XCTestCase {
         XCTAssertEqual((defaults?["participants"] as? [String]) ?? [], ["Alice", "Bob"])
         XCTAssertEqual(videos?.count, 1)
         XCTAssertEqual(videos?.first?["content"] as? String, "花見")
+        XCTAssertEqual(videos?.first?["title"] as? String, "手動タイトル")
+        XCTAssertEqual(videos?.first?["description"] as? String, "手動説明")
     }
 
     func testBatchUploadResponseParsing() {

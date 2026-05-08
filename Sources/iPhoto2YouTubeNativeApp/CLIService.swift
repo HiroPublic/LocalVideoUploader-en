@@ -23,6 +23,12 @@ enum CLIServiceError: LocalizedError {
     }
 }
 
+private struct CLILaunchConfiguration {
+    let executableURL: URL
+    let argumentsPrefix: [String]
+    let environment: [String: String]
+}
+
 protocol CLIServicing: Sendable {
     func refreshAuthStatus(environment: NativeAppEnvironment) async throws -> ChannelStatus
     func fetchCurrentChannel(environment: NativeAppEnvironment) async throws -> ChannelStatus
@@ -203,15 +209,13 @@ struct CLIService: CLIServicing {
 
     private func runBlocking(arguments: [String], environment: NativeAppEnvironment) throws -> CLICommandResult {
         let workspaceRoot = URL(fileURLWithPath: environment.workspaceRoot, isDirectory: true)
-        let executableURL = workspaceRoot.appendingPathComponent(environment.cliRelativePath)
-        guard FileManager.default.isExecutableFile(atPath: executableURL.path) else {
-            throw CLIServiceError.executableNotFound(executableURL.path)
-        }
+        let launchConfig = try resolveLaunchConfiguration(workspaceRoot: workspaceRoot, environment: environment)
 
         let process = Process()
         process.currentDirectoryURL = workspaceRoot
-        process.executableURL = executableURL
-        process.arguments = ["--support-dir", environment.supportDirectory] + arguments
+        process.executableURL = launchConfig.executableURL
+        process.arguments = launchConfig.argumentsPrefix + ["--support-dir", environment.supportDirectory] + arguments
+        process.environment = launchConfig.environment
 
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
@@ -224,6 +228,47 @@ struct CLIService: CLIServicing {
         let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         return CLICommandResult(stdout: stdout, stderr: stderr, exitCode: process.terminationStatus)
+    }
+
+    private func resolveLaunchConfiguration(
+        workspaceRoot: URL,
+        environment: NativeAppEnvironment
+    ) throws -> CLILaunchConfiguration {
+        let fileManager = FileManager.default
+        let cliURL = workspaceRoot.appendingPathComponent(environment.cliRelativePath)
+        if fileManager.isExecutableFile(atPath: cliURL.path) {
+            return CLILaunchConfiguration(
+                executableURL: cliURL,
+                argumentsPrefix: [],
+                environment: ProcessInfo.processInfo.environment
+            )
+        }
+
+        let sourcePackageURL = workspaceRoot.appendingPathComponent("src/iphoto2youtube_cli", isDirectory: true)
+        if fileManager.fileExists(atPath: sourcePackageURL.path) {
+            let pythonCandidates = [
+                "/Library/Frameworks/Python.framework/Versions/Current/bin/python3",
+                "/opt/anaconda3/bin/python3",
+                "/opt/homebrew/bin/python3",
+                "/usr/bin/python3",
+            ]
+            if let pythonPath = pythonCandidates.first(where: { fileManager.isExecutableFile(atPath: $0) }) {
+                var launchEnvironment = ProcessInfo.processInfo.environment
+                let sourceRoot = workspaceRoot.appendingPathComponent("src", isDirectory: true).path
+                let existing = launchEnvironment["PYTHONPATH"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+                launchEnvironment["PYTHONPATH"] = {
+                    guard let existing, !existing.isEmpty else { return sourceRoot }
+                    return sourceRoot + ":" + existing
+                }()
+                return CLILaunchConfiguration(
+                    executableURL: URL(fileURLWithPath: pythonPath),
+                    argumentsPrefix: ["-m", "iphoto2youtube_cli"],
+                    environment: launchEnvironment
+                )
+            }
+        }
+
+        throw CLIServiceError.executableNotFound(cliURL.path)
     }
 
     private func run(arguments: [String], environment: NativeAppEnvironment) async throws -> CLICommandResult {

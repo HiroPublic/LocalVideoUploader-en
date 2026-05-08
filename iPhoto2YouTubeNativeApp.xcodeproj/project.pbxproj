@@ -17,7 +17,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		A1000000000000000000000A /* iPhoto2YouTube.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = iPhoto2YouTube.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1000000000000000000000A /* Local Video Uploader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Local Video Uploader.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000011 /* iPhoto2YouTubeNativeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPhoto2YouTubeNativeApp.swift; sourceTree = "<group>"; };
 		A10000000000000000000012 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		A10000000000000000000013 /* CLIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIService.swift; sourceTree = "<group>"; };
@@ -63,7 +63,7 @@
 		A10000000000000000000032 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				A1000000000000000000000A /* iPhoto2YouTube.app */,
+				A1000000000000000000000A /* Local Video Uploader.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -85,7 +85,7 @@
 			);
 			name = iPhoto2YouTubeNativeApp;
 			productName = iPhoto2YouTubeNativeApp;
-			productReference = A1000000000000000000000A /* iPhoto2YouTube.app */;
+			productReference = A1000000000000000000000A /* Local Video Uploader.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -252,7 +252,7 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = iPhoto2YouTube;
+					INFOPLIST_KEY_CFBundleDisplayName = "Local Video Uploader";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "iPhoto と Photos の動画を整理するために写真ライブラリから動画を削除します。";
@@ -263,7 +263,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.iPhoto2YouTubeNativeApp;
-				PRODUCT_NAME = iPhoto2YouTube;
+					PRODUCT_NAME = "Local Video Uploader";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 6.0;
@@ -280,7 +280,7 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = iPhoto2YouTube;
+					INFOPLIST_KEY_CFBundleDisplayName = "Local Video Uploader";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "iPhoto と Photos の動画を整理するために写真ライブラリから動画を削除します。";
@@ -291,7 +291,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.iPhoto2YouTubeNativeApp;
-				PRODUCT_NAME = iPhoto2YouTube;
+					PRODUCT_NAME = "Local Video Uploader";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 6.0;

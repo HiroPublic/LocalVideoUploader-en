@@ -19,6 +19,8 @@ class VideoMetadataInput:
     offset_time_original: str = DEFAULT_OFFSET
     place: str = ""
     content: str = ""
+    custom_title: str = ""
+    custom_description: str = ""
     event_name: str = ""
     participants: list[str] = field(default_factory=list)
     camera_model: str = ""

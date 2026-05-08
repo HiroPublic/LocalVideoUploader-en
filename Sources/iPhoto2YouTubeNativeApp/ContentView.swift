@@ -181,7 +181,7 @@ struct ContentView: View {
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text("iPhoto2YouTube")
+                Text("Local Video Uploader")
                     .font(.largeTitle)
                     .fontWeight(.semibold)
                 Text("Select local videos and use the existing Python CLI to upload them in batches.")
@@ -470,7 +470,7 @@ struct ContentView: View {
             HStack {
                 Text(isHistorySearchActive
                      ? "Search Results"
-                     : "Latest \(viewModel.historyDisplayLimit) History Entries")
+                     : "Recent \(viewModel.historyDisplayLimit) History Entries")
                     .font(.headline)
                 Spacer()
                 Button("Delete History") {
@@ -525,7 +525,7 @@ struct ContentView: View {
                     ContentUnavailableView(
                         "No History",
                         systemImage: "clock.arrow.circlepath",
-                        description: Text("The latest 10 history entries are shown here.")
+                        description: Text("Only the most recent 30 days of YouTube API data are retained here.")
                     )
                     .frame(maxWidth: .infinity, minHeight: 220)
                 } else {
@@ -1586,6 +1586,14 @@ private struct DraftRow: View {
                     text: Binding(get: { draft.content }, set: { draft.content = $0 })
                 )
                 .textFieldStyle(.roundedBorder)
+            }
+
+            HStack {
+                TextField("YouTube Title (optional, otherwise auto-generated)", text: Binding(get: { draft.customTitle }, set: { draft.customTitle = $0 }))
+                    .textFieldStyle(.roundedBorder)
+                TextField("YouTube Description (optional)", text: Binding(get: { draft.customDescription }, set: { draft.customDescription = $0 }), axis: .vertical)
+                    .lineLimit(2...4)
+                    .textFieldStyle(.roundedBorder)
             }
 
             HStack {

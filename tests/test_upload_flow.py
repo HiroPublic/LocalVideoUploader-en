@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+import sqlite3
 from unittest.mock import patch
 
 from iphoto2youtube_cli.app import Application
@@ -94,6 +95,24 @@ class UploadFlowTest(unittest.TestCase):
         self.assertLessEqual(len(composed.description.encode("utf-8")), YOUTUBE_DESCRIPTION_MAX_BYTES)
         self.assertNotIn("<", composed.description)
         self.assertNotIn(">", composed.description)
+
+    def test_compose_metadata_uses_user_supplied_title_and_description_without_auto_suffix(self) -> None:
+        metadata = VideoMetadataInput(
+            video_path=Path("/tmp/sample.mov"),
+            capture_datetime=datetime(2026, 4, 7, 14, 32, 10),
+            file_size_bytes=1,
+            custom_title="  My Manual Title  ",
+            custom_description="Manual description\nSecond line",
+            place="砧公園",
+            content="花見",
+        )
+
+        composed = compose_metadata(metadata, collision_index=4)
+
+        self.assertEqual(composed.title, "My Manual Title")
+        self.assertEqual(composed.title_base, "My Manual Title")
+        self.assertEqual(composed.title_sequence, 0)
+        self.assertEqual(composed.description, "Manual description\nSecond line")
 
     def test_duplicate_upload_records_skipped_run_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -224,6 +243,72 @@ class UploadFlowTest(unittest.TestCase):
             self.assertEqual(history_deleted, 1)
             self.assertEqual(management_deleted, 1)
             self.assertIsNone(app.history_repo.get_history_record(youtube_video_id="abc123"))
+
+    def test_purge_expired_api_data_removes_records_older_than_30_days(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            support_dir = Path(tmpdir)
+            video_path = support_dir / "sample.mov"
+            video_path.write_bytes(b"demo-video")
+            paths = AppPaths(
+                support_dir=support_dir,
+                credentials_file=support_dir / "client_secret.json",
+                token_file=support_dir / "token.json",
+                history_db=support_dir / "upload_history.db",
+                management_db=support_dir / "management.db",
+                ledger_csv=support_dir / "ledger.csv",
+                settings_file=support_dir / "config.json",
+            )
+            app = Application(paths)
+            app.initialize()
+
+            metadata = VideoMetadataInput(
+                video_path=video_path,
+                capture_datetime=datetime(2026, 4, 7, 14, 32, 10),
+                file_size_bytes=video_path.stat().st_size,
+                place="砧公園",
+                content="花見",
+            )
+            composed = compose_metadata(metadata)
+            result = UploadResult(
+                success=True,
+                youtube_video_id="old123",
+                youtube_video_url="https://www.youtube.com/watch?v=old123",
+                uploaded_at=datetime(2026, 4, 8, 11, 12, 43),
+                privacy_status="private",
+                upload_status="success",
+            )
+            app.history_repo.save_upload_result(metadata, composed, result)
+            app.management_repo.upsert_video(metadata, composed, result)
+            app.history_repo.record_api_quota_usage(
+                operation="videos.insert",
+                quota_cost=100,
+                occurred_at=datetime(2026, 4, 8, 11, 12, 43),
+            )
+
+            with sqlite3.connect(paths.history_db) as conn:
+                conn.execute(
+                    "UPDATE upload_history SET uploaded_at = ? WHERE youtube_video_id = ?",
+                    ("2026-01-01T00:00:00", "old123"),
+                )
+                conn.execute(
+                    "UPDATE api_quota_log SET occurred_at = ?",
+                    ("2026-01-01T00:00:00",),
+                )
+                conn.commit()
+            with sqlite3.connect(paths.management_db) as conn:
+                conn.execute(
+                    "UPDATE video_management SET created_at = ?, updated_at = ? WHERE youtube_video_id = ?",
+                    ("2026-01-01T00:00:00", "2026-01-01T00:00:00", "old123"),
+                )
+                conn.commit()
+
+            history_cleanup = app.history_repo.purge_expired_api_data(now=datetime(2026, 5, 8, 0, 0, 0))
+            management_deleted = app.management_repo.purge_expired_api_data(now=datetime(2026, 5, 8, 0, 0, 0))
+
+            self.assertEqual(history_cleanup["history_deleted"], 1)
+            self.assertEqual(history_cleanup["quota_deleted"], 1)
+            self.assertEqual(management_deleted, 1)
+            self.assertIsNone(app.history_repo.get_history_record(youtube_video_id="old123"))
 
     def test_delete_uploaded_video_skips_remote_delete_for_dryrun(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

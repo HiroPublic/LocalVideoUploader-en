@@ -15,7 +15,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "A10000000000000000000040"
-               BuildableName = "iPhoto2YouTubeNativeApp.app"
+               BuildableName = "Local Video Uploader.app"
                BlueprintName = "iPhoto2YouTubeNativeApp"
                ReferencedContainer = "container:iPhoto2YouTubeNativeApp.xcodeproj">
             </BuildableReference>
@@ -45,7 +45,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A10000000000000000000040"
-            BuildableName = "iPhoto2YouTubeNativeApp.app"
+            BuildableName = "Local Video Uploader.app"
             BlueprintName = "iPhoto2YouTubeNativeApp"
             ReferencedContainer = "container:iPhoto2YouTubeNativeApp.xcodeproj">
          </BuildableReference>
@@ -62,7 +62,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A10000000000000000000040"
-            BuildableName = "iPhoto2YouTubeNativeApp.app"
+            BuildableName = "Local Video Uploader.app"
             BlueprintName = "iPhoto2YouTubeNativeApp"
             ReferencedContainer = "container:iPhoto2YouTubeNativeApp.xcodeproj">
          </BuildableReference>

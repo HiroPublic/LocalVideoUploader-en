@@ -7,6 +7,8 @@ final class VideoDraft: ObservableObject, Identifiable {
     @Published var filePath: String
     @Published var captureDate: Date
     @Published var content: String
+    @Published var customTitle: String
+    @Published var customDescription: String
     @Published var place: String
     @Published var eventName: String
     @Published var participantsText: String
@@ -19,6 +21,8 @@ final class VideoDraft: ObservableObject, Identifiable {
         filePath: String,
         captureDate: Date,
         content: String = "",
+        customTitle: String = "",
+        customDescription: String = "",
         place: String = "",
         eventName: String = "",
         participantsText: String = "",
@@ -30,6 +34,8 @@ final class VideoDraft: ObservableObject, Identifiable {
         self.filePath = filePath
         self.captureDate = captureDate
         self.content = content
+        self.customTitle = customTitle
+        self.customDescription = customDescription
         self.place = place
         self.eventName = eventName
         self.participantsText = participantsText
@@ -154,6 +160,8 @@ struct BatchUploadResponse: Equatable {
 struct UploadedVideoMetadataSnapshot: Equatable {
     var captureDate: Date
     var content: String
+    var customTitle: String
+    var customDescription: String
     var place: String
     var eventName: String
     var participantsText: String
@@ -165,6 +173,8 @@ struct UploadedVideoMetadataSnapshot: Equatable {
     init(draft: VideoDraft) {
         self.captureDate = draft.captureDate
         self.content = draft.content
+        self.customTitle = draft.customTitle
+        self.customDescription = draft.customDescription
         self.place = draft.place
         self.eventName = draft.eventName
         self.participantsText = draft.participantsText
@@ -1327,6 +1337,8 @@ struct BatchVideoItem: Encodable, Equatable {
     var video: String
     var captureDatetime: String
     var content: String
+    var title: String?
+    var description: String?
     var place: String?
     var eventName: String?
     var participants: [String]?
@@ -1338,6 +1350,8 @@ struct BatchVideoItem: Encodable, Equatable {
         case video
         case captureDatetime = "capture_datetime"
         case content
+        case title
+        case description
         case place
         case eventName = "event_name"
         case participants
@@ -1374,6 +1388,8 @@ struct BatchUploadManifestBuilder {
                 video: draft.filePath,
                 captureDatetime: dateFormatter.string(from: draft.captureDate),
                 content: draft.content,
+                title: draft.customTitle.isEmpty ? nil : draft.customTitle,
+                description: draft.customDescription.isEmpty ? nil : draft.customDescription,
                 place: draft.place.isEmpty ? nil : draft.place,
                 eventName: draft.eventName.isEmpty ? nil : draft.eventName,
                 participants: splitCSV(draft.participantsText).isEmpty ? nil : splitCSV(draft.participantsText),

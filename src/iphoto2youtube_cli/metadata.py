@@ -27,6 +27,15 @@ def sanitize_title_component(value: str) -> str:
     return re.sub(r'[\\/:*?"<>|]+', "-", normalized).replace(" ", "")
 
 
+def normalize_user_title(value: str) -> str:
+    compact = normalize_for_lookup(value)
+    return _truncate_chars(sanitize_youtube_text(compact), YOUTUBE_TITLE_MAX_CHARS)
+
+
+def normalize_user_description(value: str) -> str:
+    return _truncate_utf8_bytes(sanitize_youtube_text(value.strip()), YOUTUBE_DESCRIPTION_MAX_BYTES)
+
+
 def sanitize_youtube_text(value: str) -> str:
     return value.replace("<", "＜").replace(">", "＞")
 
@@ -69,6 +78,9 @@ def build_title_base(metadata: VideoMetadataInput) -> str:
 
 
 def build_title(metadata: VideoMetadataInput, collision_index: int = 0) -> tuple[str, str, int]:
+    if metadata.custom_title:
+        title = normalize_user_title(metadata.custom_title)
+        return title, title, 0
     base = build_title_base(metadata)
     suffix = "" if collision_index <= 0 else f"_{collision_index:02d}"
     safe_base = _truncate_chars(base, YOUTUBE_TITLE_MAX_CHARS - len(suffix))
@@ -122,6 +134,8 @@ def build_description(
     tags: list[str],
     uploaded_at: datetime,
 ) -> str:
+    if metadata.custom_description:
+        return normalize_user_description(metadata.custom_description)
     participants_display = ", ".join(metadata.participants) if metadata.participants else PARTICIPANTS_FALLBACK
     participants_key = " | ".join(metadata.participants) if metadata.participants else PARTICIPANTS_FALLBACK
     place_value = _coalesce(metadata.place, PLACE_FALLBACK)

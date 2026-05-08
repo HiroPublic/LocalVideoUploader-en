@@ -1,14 +1,14 @@
-# **Terms of Service for iPhoto2YouTube**
+# **Terms of Service for Local Video Uploader**
 
 **Last Updated:** April 22, 2026
 
 ## **1\. Acceptance of Terms**
 
-By downloading, accessing, or using the iPhoto2YouTube macOS desktop application ("the Application"), you agree to be bound by these Terms of Service. If you do not agree to these terms, do not use the Application.
+By downloading, accessing, or using the Local Video Uploader macOS desktop application ("the Application"), you agree to be bound by these Terms of Service. If you do not agree to these terms, do not use the Application.
 
 ## **2\. Description of Service**
 
-iPhoto2YouTube is a locally hosted desktop tool that facilitates the uploading of video files from a user's local macOS environment to their personal YouTube channel using the YouTube Data API.
+Local Video Uploader is a locally hosted desktop tool that facilitates the uploading of video files from a user's local macOS environment to their personal YouTube channel using the YouTube Data API.
 
 ## **3\. Compliance with YouTube Terms of Service**
 
@@ -18,7 +18,7 @@ Any violation of the YouTube Terms of Service while using this Application is st
 
 ## **4\. Privacy**
 
-Your privacy is important to us. Please review our [**Privacy Policy**](https://github.com/HiroPublic/iPhoto2YouTube-en/blob/main/Privacy%20Policy.md), which explains how the Application handles your data locally. By using the Application, you also acknowledge that your data is subject to the [**Google Privacy Policy**](https://policies.google.com/privacy) when interacting with the YouTube API.
+Your privacy is important to us. Please review our [**Privacy Policy**](https://github.com/HiroPublic/LocalVideoUploader-en/blob/main/Privacy%20Policy.md), which explains how the Application handles your data locally. By using the Application, you also acknowledge that your data is subject to the [**Google Privacy Policy**](https://policies.google.com/privacy) when interacting with the YouTube API.
 
 ## **5\. User Responsibilities**
 

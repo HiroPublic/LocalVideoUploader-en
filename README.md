@@ -1,14 +1,14 @@
-# iPhoto2YouTube
+# Local Video Uploader
 
 ## 1. Overview
 
-iPhoto2YouTube is a macOS desktop application that allows users to upload videos from their local photo library to their own YouTube channel.
+Local Video Uploader is a macOS desktop application that allows users to upload videos from their local photo library to their own YouTube channel.
 
 The application is designed for personal use and operates entirely through explicit user interaction.
 
 ### Related Documents
 
-- [API Documentation](iPhoto2YouTube_API_Documentation.md): Overview of iPhoto2YouTube API integration and usage.
+- [API Documentation](iPhoto2YouTube_API_Documentation.md): Overview of Local Video Uploader API integration and usage.
 - [Privacy Policy](Privacy%20Policy.md): Privacy policy for the application.
 - [Terms of Service](Terms%20of%20Service.md): Terms of service for the application.
 
@@ -73,7 +73,7 @@ Stored locally on user's device only.
 - No passwords stored
 
 ### Retention
-Data is kept only for application use and can be deleted by the user.
+YouTube API-derived data is retained for up to 30 days. Older API-derived records are automatically removed from local storage.
 
 ---
 
@@ -113,3 +113,15 @@ The application complies with YouTube API Services policies:
 - Desktop application (not a web service)
 - Personal-use tool
 - Fully user-controlled workflow
+
+---
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Author
+
+Copyright (c) 2026 HiroPublic
+
+This project was developed with assistance from generative AI.

@@ -19,6 +19,8 @@ class GoogleOAuthService:
         try:
             from google.oauth2.credentials import Credentials
         except ImportError as exc:
+            if optional:
+                return None
             raise AuthError(
                 "Google OAuth ライブラリが未導入です。`pip install -e .` を実行してください。"
             ) from exc
@@ -44,6 +46,8 @@ class GoogleOAuthService:
         try:
             from google.auth.transport.requests import Request
         except ImportError as exc:
+            if optional:
+                return None
             raise AuthError(
                 "Google OAuth ライブラリが未導入です。`pip install -e .` を実行してください。"
             ) from exc
