@@ -1,6 +1,6 @@
 # **Privacy Policy for Local Video Uploader**
 
-**Last Updated:** April 22, 2026
+**Last Updated:** May 8, 2026
 
 ## **1\. Introduction**
 
