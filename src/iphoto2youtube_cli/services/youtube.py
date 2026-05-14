@@ -6,7 +6,7 @@ import json
 from ..exceptions import UploadError, YouTubeApiError
 from ..models import ChannelInfo, ComposedMetadata, UploadResult, VideoMetadataInput
 
-YOUTUBE_API_DAILY_QUOTA_LIMIT = 10_000
+YOUTUBE_API_DAILY_QUOTA_LIMIT = 50_000
 YOUTUBE_API_QUOTA_COSTS = {
     "channels.list": 1,
     "videos.list": 1,
@@ -434,6 +434,21 @@ def _record_quota_usage(quota_logger, operation: str) -> None:
     quota_logger.record_api_quota_usage(operation=operation, quota_cost=quota_cost)
 
 
+def _extract_error_detail(exc: Exception) -> str:
+    content = getattr(exc, "content", b"") or b""
+    if not content:
+        return ""
+    try:
+        payload = json.loads(content.decode("utf-8", errors="ignore"))
+        error_payload = payload.get("error", {}) if isinstance(payload, dict) else {}
+        error_message = str(error_payload.get("message") or "").strip()
+        errors = error_payload.get("errors") or []
+        first_reason = str(errors[0].get("reason") or "").strip() if errors else ""
+        return " / ".join(part for part in [first_reason, error_message] if part)
+    except Exception:
+        return ""
+
+
 def _classify_youtube_error(exc: Exception, *, operation: str) -> YouTubeApiError:
     try:
         from googleapiclient.errors import HttpError
@@ -456,42 +471,35 @@ def _classify_youtube_error(exc: Exception, *, operation: str) -> YouTubeApiErro
         category = "unknown"
         retryable = False
         message = f"YouTube API エラー: {operation}"
+        detail = _extract_error_detail(exc)
         if status_code in {401}:
             category = "auth"
             message = f"YouTube 認証が無効です: {operation}. `auth-login` をやり直してください。"
         elif status_code in {403} and ("quota" in reason.lower() or "dailyLimitExceeded" in reason):
             category = "quota"
-            message = f"YouTube API クォータ不足です: {operation}. 日次上限の可能性があります。"
+            suffix = f" 詳細: {detail}" if detail else ""
+            message = f"YouTube API クォータ不足です: {operation}. 日次上限の可能性があります。{suffix}"
         elif status_code in {403} and ("rateLimit" in reason or "userRateLimitExceeded" in reason):
             category = "rate_limit"
             retryable = True
-            message = f"YouTube API のレート制限です: {operation}. 少し待って再試行してください。"
+            suffix = f" 詳細: {detail}" if detail else ""
+            message = f"YouTube API のレート制限です: {operation}. 少し待って再試行してください。{suffix}"
         elif status_code in {403}:
             category = "permission"
-            message = f"YouTube API 権限エラーです: {operation}. 認証アカウントと権限を確認してください。"
+            suffix = f" 詳細: {detail}" if detail else ""
+            message = f"YouTube API 権限エラーです: {operation}. 認証アカウントと権限を確認してください。{suffix}"
         elif status_code in {404}:
             category = "not_found"
             message = f"YouTube API で対象が見つかりません: {operation}."
         elif status_code in {400} and "uploadLimitExceeded" in reason:
             category = "upload_limit"
+            suffix = f" 詳細: {detail}" if detail else ""
             message = (
-                f"YouTube の動画アップロード上限に達しています: {operation}. "
-                "チャンネルのアップロード制限を確認してください。"
+                f"YouTube チャンネルの日次アップロード本数制限に達しました: {operation}. "
+                f"24時間後に再試行してください。{suffix}"
             )
         elif status_code in {400}:
             category = "invalid_request"
-            detail = ""
-            content = getattr(exc, "content", b"") or b""
-            if content:
-                try:
-                    payload = json.loads(content.decode("utf-8", errors="ignore"))
-                    error_payload = payload.get("error", {}) if isinstance(payload, dict) else {}
-                    error_message = str(error_payload.get("message") or "").strip()
-                    errors = error_payload.get("errors") or []
-                    first_reason = str(errors[0].get("reason") or "").strip() if errors else ""
-                    detail = " / ".join(part for part in [first_reason, error_message] if part)
-                except Exception:
-                    detail = ""
             suffix = f" 詳細: {detail}" if detail else ""
             message = f"YouTube API へのリクエストが不正です: {operation}. 入力値を確認してください。{suffix}"
         elif status_code and status_code >= 500:

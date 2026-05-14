@@ -308,6 +308,7 @@ final class BatchUploadManifestBuilderTests: XCTestCase {
     func testApplyAllPhotoLibraryPresetsAddsEachPresetInOrder() {
         let viewModel = AppViewModel()
         viewModel.historicalOptions.playlists = ["HoverX1", "Insta360", "[散歩] 自宅_花見"]
+        viewModel.commonMetadata.playlistsText = "[散歩] 自宅_花見"
         viewModel.photoLibraryVideos = [
             PhotoLibraryVideoItem(
                 id: "vlog",
@@ -349,8 +350,30 @@ final class BatchUploadManifestBuilderTests: XCTestCase {
             viewModel.drafts.map(\.playlistsText),
             ["[散歩] 自宅_花見", "HoverX1", "Insta360"]
         )
-        XCTAssertEqual(viewModel.commonMetadata.cameraModel, "Insta360")
-        XCTAssertEqual(viewModel.commonMetadata.playlistsText, "Insta360")
+        XCTAssertEqual(viewModel.commonMetadata.cameraModel, "Vlog")
+        XCTAssertEqual(viewModel.commonMetadata.playlistsText, "[散歩] 自宅_花見")
+    }
+
+    @MainActor
+    func testApplyAllPhotoLibraryPresetsKeepsSharedPlaylistWhenOnlyInsta360Matches() {
+        let viewModel = AppViewModel()
+        viewModel.commonMetadata.playlistsText = "[散歩] 自宅_花見"
+        viewModel.photoLibraryVideos = [
+            PhotoLibraryVideoItem(
+                id: "insta",
+                filePath: "/tmp/VID_0001.mp4",
+                fileName: "VID_0001.mp4",
+                captureDate: Date(timeIntervalSince1970: 0),
+                durationSeconds: 30,
+                durationText: "00:30",
+                thumbnailPNGData: nil
+            )
+        ]
+
+        viewModel.applyAllPhotoLibraryPresets()
+
+        XCTAssertEqual(viewModel.drafts.map(\.playlistsText), ["Insta360"])
+        XCTAssertEqual(viewModel.commonMetadata.playlistsText, "[散歩] 自宅_花見")
     }
 
     @MainActor
@@ -537,6 +560,26 @@ final class BatchUploadManifestBuilderTests: XCTestCase {
     @MainActor
     func testRunBatchUploadDoesNotAutoVerifyUploadedVideos() async {
         let cliService = MockCLIService()
+        cliService.refreshAuthStatusResult = ChannelStatus(
+            status: "authenticated",
+            channelID: "channel123",
+            channelTitle: "Sample Channel",
+            channelHandle: "@example_channel",
+            tokenFile: "/tmp/token.json",
+            credentialsFile: "/tmp/client_secret.json",
+            youtubeAPIQuota: YouTubeAPIQuotaStatus(
+                date: "2026-05-13",
+                used: 100,
+                limit: 50_000,
+                remaining: 49_900,
+                usageRatio: 0.002,
+                isEstimated: true,
+                windowStartText: "",
+                windowEndText: "",
+                windowLabel: "",
+                topOperations: []
+            )
+        )
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let environment = NativeAppEnvironment(
@@ -566,8 +609,44 @@ final class BatchUploadManifestBuilderTests: XCTestCase {
         await viewModel.runBatchUpload(dryRun: false)
 
         XCTAssertEqual(cliService.verifyUploadCallCount, 0)
+        XCTAssertEqual(cliService.refreshAuthStatusCallCount, 1)
         XCTAssertTrue(viewModel.verificationReports.isEmpty)
         XCTAssertEqual(viewModel.uploadedVideos.map(\.filePath), ["/tmp/movie.mov"])
+        XCTAssertEqual(viewModel.authStatus.youtubeAPIQuota.used, 100)
+    }
+
+    @MainActor
+    func testRunBatchUploadDryRunDoesNotRefreshAuthStatus() async {
+        let cliService = MockCLIService()
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let environment = NativeAppEnvironment(
+            workspaceRoot: root.path,
+            cliRelativePath: ".venv/bin/iphoto2youtube",
+            supportDirectory: ".iphoto2youtube"
+        )
+        let viewModel = AppViewModel(
+            environment: environment,
+            cliService: cliService,
+            photoLibraryService: MockPhotoLibraryService()
+        )
+        viewModel.commonMetadata.place = "砧公園"
+        viewModel.commonMetadata.eventName = "花見"
+        viewModel.commonMetadata.playlistsText = "[散歩] 自宅_花見"
+        viewModel.drafts = [
+            VideoDraft(
+                filePath: "/tmp/movie.mov",
+                captureDate: Date(timeIntervalSince1970: 0),
+                content: "花見"
+            )
+        ]
+        cliService.batchUploadResults = [
+            makeBatchUploadResponse(path: "/tmp/movie.mov", title: "uploaded")
+        ]
+
+        await viewModel.runBatchUpload(dryRun: true)
+
+        XCTAssertEqual(cliService.refreshAuthStatusCallCount, 0)
     }
 
     @MainActor
@@ -741,6 +820,46 @@ final class BatchUploadManifestBuilderTests: XCTestCase {
         XCTAssertEqual(viewModel.lastError, "upload failed")
         XCTAssertTrue(viewModel.logOutput.contains("Photo Auto aborted: Upload Vlog"))
         XCTAssertFalse(viewModel.isPhotoLibraryAutoRunning)
+    }
+
+    @MainActor
+    func testPhotoLibraryAutoWorkflowKeepsSharedPlaylistWhenInsta360Runs() async {
+        let service = MockPhotoLibraryService()
+        let cliService = MockCLIService()
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let environment = NativeAppEnvironment(
+            workspaceRoot: root.path,
+            cliRelativePath: ".venv/bin/iphoto2youtube",
+            supportDirectory: ".iphoto2youtube"
+        )
+        let viewModel = AppViewModel(environment: environment, cliService: cliService, photoLibraryService: service)
+        viewModel.commonMetadata.place = "太田"
+        viewModel.commonMetadata.eventName = "滞在"
+        viewModel.commonMetadata.playlistsText = "[散歩] 自宅_花見"
+        viewModel.photoLibraryVideos = [
+            PhotoLibraryVideoItem(
+                id: "insta",
+                filePath: "/tmp/VID_0001.mp4",
+                fileName: "VID_0001.mp4",
+                captureDate: Date(timeIntervalSince1970: 0),
+                durationSeconds: 30,
+                durationText: "00:30",
+                thumbnailPNGData: nil
+            )
+        ]
+        cliService.batchUploadResults = [
+            makeBatchUploadResponse(path: "/tmp/VID_0001.mp4", title: "insta360")
+        ]
+        service.fetchedVideos = []
+
+        await viewModel.runPhotoLibraryAutoWorkflow()
+
+        XCTAssertEqual(viewModel.commonMetadata.playlistsText, "[散歩] 自宅_花見")
+        XCTAssertEqual(cliService.batchUploadCallCount, 1)
+        XCTAssertEqual(service.deletedIDs, [["insta"]])
+        XCTAssertTrue(viewModel.drafts.isEmpty)
+        XCTAssertTrue(viewModel.lastError.isEmpty)
     }
 
     @MainActor

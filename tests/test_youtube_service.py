@@ -157,7 +157,10 @@ class YouTubeServiceTest(unittest.TestCase):
         classified = _classify_youtube_error(error, operation="videos.insert")
 
         self.assertEqual(classified.category, "upload_limit")
-        self.assertIn("アップロード上限", str(classified))
+        self.assertIn("日次アップロード本数制限", str(classified))
+        self.assertIn("24時間後に再試行してください", str(classified))
+        self.assertIn("uploadLimitExceeded", str(classified))
+        self.assertIn("The user has exceeded the number of videos they may upload.", str(classified))
 
     def test_sync_video_metadata_updates_video_and_playlists(self) -> None:
         service = YouTubeUploadService.__new__(YouTubeUploadService)

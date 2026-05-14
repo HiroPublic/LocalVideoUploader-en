@@ -8,7 +8,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from iphoto2youtube_cli.app import Application
-from iphoto2youtube_cli.config import AppPaths
+from iphoto2youtube_cli.config import AppPaths, AppSettings
 
 
 class QuotaUsageTest(unittest.TestCase):
@@ -24,7 +24,7 @@ class QuotaUsageTest(unittest.TestCase):
                 ledger_csv=root / "ledger.csv",
                 settings_file=root / "config.json",
             )
-            app = Application(paths)
+            app = Application(paths, settings=AppSettings(youtube_api_daily_quota_limit=50_000))
             app.initialize()
             app.history_repo.record_api_quota_usage(operation="videos.insert", quota_cost=1600)
             app.history_repo.record_api_quota_usage(operation="playlistItems.insert", quota_cost=50)
@@ -33,8 +33,8 @@ class QuotaUsageTest(unittest.TestCase):
             quota = result.payload["youtube_api_quota"]
 
             self.assertEqual(quota["used"], 150)
-            self.assertEqual(quota["limit"], 10000)
-            self.assertEqual(quota["remaining"], 9850)
+            self.assertEqual(quota["limit"], 50000)
+            self.assertEqual(quota["remaining"], 49850)
             self.assertTrue(quota["is_estimated"])
             self.assertEqual(quota["breakdown"][0]["operation"], "videos.insert")
             self.assertEqual(quota["breakdown"][0]["used"], 100)

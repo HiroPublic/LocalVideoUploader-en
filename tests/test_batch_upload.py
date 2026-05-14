@@ -159,7 +159,7 @@ class BatchUploadTest(unittest.TestCase):
             with patch.object(app, "perform_upload", side_effect=[
                 uploaded,
                 YouTubeApiError(
-                    "YouTube の動画アップロード上限に達しています: videos.insert.",
+                    "YouTube チャンネルの日次アップロード本数制限に達しました: videos.insert.",
                     operation="videos.insert",
                     category="upload_limit",
                     retryable=False,

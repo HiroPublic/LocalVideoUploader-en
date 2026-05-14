@@ -569,7 +569,8 @@ final class AppViewModel: ObservableObject {
             applyPhotoLibraryPreset(
                 fileNamePrefix: "VID_",
                 cameraModel: "Insta360",
-                playlistName: "Insta360"
+                playlistName: "Insta360",
+                updateSharedMetadata: false
             )
             guard handlePhotoLibraryAutoStepResult(stepName: "Upload Insta360") else { return }
             await runBatchUpload(dryRun: false)
@@ -588,7 +589,8 @@ final class AppViewModel: ObservableObject {
             applyPhotoLibraryPreset(
                 fileNamePrefix: "HOVER_",
                 cameraModel: "HoverX1",
-                playlistName: "HoverX1"
+                playlistName: "HoverX1",
+                updateSharedMetadata: false
             )
             guard handlePhotoLibraryAutoStepResult(stepName: "Upload HoverX1") else { return }
             await runBatchUpload(dryRun: false)
@@ -700,14 +702,16 @@ final class AppViewModel: ObservableObject {
     func applyPhotoLibraryPreset(
         fileNamePrefix: String,
         cameraModel: String,
-        playlistName: String
+        playlistName: String,
+        updateSharedMetadata: Bool = true
     ) {
         applyPhotoLibraryPreset(
             matching: { $0.fileName.uppercased().hasPrefix(fileNamePrefix.uppercased()) },
             cameraModel: cameraModel,
             playlistName: playlistName,
             presetName: cameraModel,
-            notFoundMessage: "No videos starting with \(fileNamePrefix) were found."
+            notFoundMessage: "No videos starting with \(fileNamePrefix) were found.",
+            updateSharedMetadata: updateSharedMetadata
         )
     }
 
@@ -727,20 +731,23 @@ final class AppViewModel: ObservableObject {
     }
 
     func applyAllPhotoLibraryPresets() {
+        let originalPlaylist = commonMetadata.playlistsText
         let presets: [() -> Void] = [
             { self.applyVlogPhotoLibraryPreset() },
             {
                 self.applyPhotoLibraryPreset(
                     fileNamePrefix: "HOVER_",
                     cameraModel: "HoverX1",
-                    playlistName: "HoverX1"
+                    playlistName: "HoverX1",
+                    updateSharedMetadata: false
                 )
             },
             {
                 self.applyPhotoLibraryPreset(
                     fileNamePrefix: "VID_",
                     cameraModel: "Insta360",
-                    playlistName: "Insta360"
+                    playlistName: "Insta360",
+                    updateSharedMetadata: false
                 )
             },
         ]
@@ -750,6 +757,7 @@ final class AppViewModel: ObservableObject {
         for applyPreset in presets {
             applyPreset()
         }
+        commonMetadata.playlistsText = originalPlaylist
         if drafts.count == existingDraftCount && lastError.isEmpty {
             lastError = "No videos were available to add."
         } else if drafts.count > existingDraftCount {
@@ -757,7 +765,11 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    private func addPhotoLibraryVideosToDrafts(_ chosen: [PhotoLibraryVideoItem]) {
+    private func addPhotoLibraryVideosToDrafts(
+        _ chosen: [PhotoLibraryVideoItem],
+        cameraModelOverride: String? = nil,
+        playlistNameOverride: String? = nil
+    ) {
         guard !chosen.isEmpty else { return }
         var addedCount = 0
         for item in chosen {
@@ -769,8 +781,8 @@ final class AppViewModel: ObservableObject {
                     place: commonMetadata.place,
                     eventName: commonMetadata.eventName,
                     participantsText: commonMetadata.participantsText,
-                    cameraModel: commonMetadata.cameraModel,
-                    playlistsText: commonMetadata.playlistsText,
+                    cameraModel: cameraModelOverride ?? commonMetadata.cameraModel,
+                    playlistsText: playlistNameOverride ?? commonMetadata.playlistsText,
                     note: commonMetadata.note
                 )
             )
@@ -786,7 +798,8 @@ final class AppViewModel: ObservableObject {
         cameraModel: String,
         playlistName: String,
         presetName: String,
-        notFoundMessage: String
+        notFoundMessage: String,
+        updateSharedMetadata: Bool = true
     ) {
         let matched = photoLibraryVideos.filter { matcher($0) }
         guard !matched.isEmpty else {
@@ -803,11 +816,18 @@ final class AppViewModel: ObservableObject {
         }
 
         lastError = ""
-        commonMetadata.cameraModel = cameraModel
-        commonMetadata.playlistsText = playlistName
+        if updateSharedMetadata {
+            commonMetadata.cameraModel = cameraModel
+            commonMetadata.playlistsText = playlistName
+        }
         selectedPhotoLibraryVideoIDs = Set(newItems.map(\.id))
-        addPhotoLibraryVideosToDrafts(newItems)
-        appendLog("Applied \(presetName) preset: selected \(newItems.count) item(s) and updated shared metadata.")
+        addPhotoLibraryVideosToDrafts(
+            newItems,
+            cameraModelOverride: cameraModel,
+            playlistNameOverride: playlistName
+        )
+        let suffix = updateSharedMetadata ? " and updated shared metadata." : "."
+        appendLog("Applied \(presetName) preset: selected \(newItems.count) item(s)\(suffix)")
     }
 
     private func latestVlogPlaylistName() -> String? {
@@ -974,6 +994,7 @@ final class AppViewModel: ObservableObject {
                 moveUploadedVideos(from: result, snapshots: draftSnapshots)
                 try updateHistoryCalendarAfterUpload(result: result, snapshots: draftSnapshots)
                 verificationReports = []
+                await refreshAuthStatusAfterUpload()
             }
             refreshHistoricalOptions()
         }

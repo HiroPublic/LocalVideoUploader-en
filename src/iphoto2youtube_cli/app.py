@@ -51,7 +51,9 @@ class Application:
             "status": message,
             "token_file": str(token_path) if token_path else "",
             "credentials_file": str(self.paths.credentials_file),
-            "youtube_api_quota": self.history_repo.get_daily_api_quota_usage(),
+            "youtube_api_quota": self.history_repo.get_daily_api_quota_usage(
+                daily_limit=self.settings.youtube_api_daily_quota_limit
+            ),
         }
         return CommandResult(message=message, payload=payload)
 

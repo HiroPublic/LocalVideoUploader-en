@@ -53,3 +53,43 @@ class CliSettingsTest(unittest.TestCase):
             self.assertEqual(args.playlist_privacy_status, "unlisted")
             self.assertEqual(args.library_name, "Archive")
 
+    def test_load_app_settings_uses_default_youtube_quota_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            support_dir = Path(tmpdir)
+            settings_file = support_dir / "config.json"
+            settings_file.write_text("{}", encoding="utf-8")
+            paths = AppPaths(
+                support_dir=support_dir,
+                credentials_file=support_dir / "client_secret.json",
+                token_file=support_dir / "token.json",
+                history_db=support_dir / "upload_history.db",
+                management_db=support_dir / "management.db",
+                ledger_csv=support_dir / "ledger.csv",
+                settings_file=settings_file,
+            )
+
+            settings = load_app_settings(paths)
+
+            self.assertEqual(settings.youtube_api_daily_quota_limit, 50_000)
+
+    def test_load_app_settings_reads_youtube_quota_limit_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            support_dir = Path(tmpdir)
+            settings_file = support_dir / "config.json"
+            settings_file.write_text(
+                json.dumps({"youtube_api_daily_quota_limit": 75000}),
+                encoding="utf-8",
+            )
+            paths = AppPaths(
+                support_dir=support_dir,
+                credentials_file=support_dir / "client_secret.json",
+                token_file=support_dir / "token.json",
+                history_db=support_dir / "upload_history.db",
+                management_db=support_dir / "management.db",
+                ledger_csv=support_dir / "ledger.csv",
+                settings_file=settings_file,
+            )
+
+            settings = load_app_settings(paths)
+
+            self.assertEqual(settings.youtube_api_daily_quota_limit, 75_000)

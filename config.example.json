@@ -6,5 +6,6 @@
   "default_library_name": "Local Files",
   "default_timezone": "JST",
   "default_offset_time_original": "+09:00",
-  "default_capture_date_source": "manual_input"
+  "default_capture_date_source": "manual_input",
+  "youtube_api_daily_quota_limit": 50000
 }

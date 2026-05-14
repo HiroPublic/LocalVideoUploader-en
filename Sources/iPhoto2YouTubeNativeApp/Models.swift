@@ -106,8 +106,8 @@ struct YouTubeAPIQuotaStatus: Equatable {
     static let unknown = YouTubeAPIQuotaStatus(
         date: "",
         used: 0,
-        limit: 10_000,
-        remaining: 10_000,
+        limit: 50_000,
+        remaining: 50_000,
         usageRatio: 0,
         isEstimated: true,
         windowStartText: "",

@@ -352,7 +352,7 @@ class UploadHistoryRepository:
         self,
         *,
         target_date: str | None = None,
-        daily_limit: int = 10_000,
+        daily_limit: int = 50_000,
     ) -> dict[str, object]:
         quota_window = self._current_quota_window()
         with sqlite3.connect(self.db_path) as conn:

@@ -10,6 +10,7 @@ DEFAULT_TIMEZONE = "JST"
 DEFAULT_OFFSET = "+09:00"
 DEFAULT_PRIVACY_STATUS = "private"
 DEFAULT_PLAYLIST_PRIVACY_STATUS = "private"
+DEFAULT_YOUTUBE_API_DAILY_QUOTA_LIMIT = 50_000
 YOUTUBE_SCOPES = [
     "https://www.googleapis.com/auth/youtube",
     "https://www.googleapis.com/auth/youtube.force-ssl",
@@ -66,6 +67,15 @@ class AppSettings:
     default_timezone: str = DEFAULT_TIMEZONE
     default_offset_time_original: str = DEFAULT_OFFSET
     default_capture_date_source: str = "manual_input"
+    youtube_api_daily_quota_limit: int = DEFAULT_YOUTUBE_API_DAILY_QUOTA_LIMIT
+
+
+def _read_int_setting(raw: object, default: int) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
 
 
 def load_app_settings(paths: AppPaths) -> AppSettings:
@@ -89,6 +99,10 @@ def load_app_settings(paths: AppPaths) -> AppSettings:
         default_timezone=str(raw.get("default_timezone") or DEFAULT_TIMEZONE),
         default_offset_time_original=str(raw.get("default_offset_time_original") or DEFAULT_OFFSET),
         default_capture_date_source=str(raw.get("default_capture_date_source") or "manual_input"),
+        youtube_api_daily_quota_limit=_read_int_setting(
+            raw.get("youtube_api_daily_quota_limit"),
+            DEFAULT_YOUTUBE_API_DAILY_QUOTA_LIMIT,
+        ),
     )
 
 

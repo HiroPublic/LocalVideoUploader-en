@@ -116,6 +116,38 @@ The application complies with YouTube API Services policies:
 
 ---
 
+## 10. Configuration
+
+The app reads user settings from `config.json` in the support directory.
+
+Default path:
+
+- `./.iphoto2youtube/config.json`
+
+Related files:
+
+- `src/iphoto2youtube_cli/config.py`: Defines available settings, default values, and how `config.json` is loaded.
+- `config.example.json`: Example user-editable configuration file.
+- `config.json`: The actual runtime configuration for your local environment.
+
+How to change a setting:
+
+1. Change `config.json` if you want to override the value for your local environment.
+2. Change `src/iphoto2youtube_cli/config.py` if you want to change the application's built-in default.
+3. Change `config.example.json` if you want the sample file to show the new recommended value.
+
+Example:
+
+```json
+{
+  "youtube_api_daily_quota_limit": 50000
+}
+```
+
+If `youtube_api_daily_quota_limit` is omitted from `config.json`, the built-in default from `src/iphoto2youtube_cli/config.py` is used.
+
+---
+
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.

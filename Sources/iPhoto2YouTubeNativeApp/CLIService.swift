@@ -92,7 +92,7 @@ struct CLIService: CLIServicing {
             youtubeAPIQuota: YouTubeAPIQuotaStatus(
                 date: quotaPayload?["date"] as? String ?? "",
                 used: quotaPayload?["used"] as? Int ?? 0,
-                limit: quotaPayload?["limit"] as? Int ?? 10_000,
+                limit: quotaPayload?["limit"] as? Int ?? 50_000,
                 remaining: quotaPayload?["remaining"] as? Int ?? 0,
                 usageRatio: quotaPayload?["usage_ratio"] as? Double ?? 0,
                 isEstimated: quotaPayload?["is_estimated"] as? Bool ?? true,
