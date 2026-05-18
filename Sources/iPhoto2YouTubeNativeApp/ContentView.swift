@@ -5,6 +5,7 @@ struct ContentView: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var showExitConfirmation = false
     @State private var selectedScreen: AppScreen
+    @State private var isProcessingCursorActive = false
 
     init(viewModel: AppViewModel) {
         self.viewModel = viewModel
@@ -12,144 +13,186 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    GroupBox("Connection") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            labeledValue("Workspace", viewModel.environment.workspaceRoot)
-                            labeledValue("CLI", viewModel.environment.cliRelativePath)
-                            labeledValue("Support Dir", viewModel.environment.supportDirectory)
-                            Button("Refresh Auth Status") {
-                                Task { await viewModel.refreshAuthStatus() }
-                            }
-                            .disabled(viewModel.isRunning)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    GroupBox("Authenticated Channel") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            labeledValue("Status", viewModel.authStatus.status)
-                            labeledValue("Channel", viewModel.authStatus.channelTitle)
-                            labeledValue("Handle", viewModel.authStatus.channelHandle)
-                            labeledValue("Channel ID", viewModel.authStatus.channelID)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    GroupBox("YouTube Data API") {
-                        youtubeQuotaStatusView
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    GroupBox("Shared Metadata") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("These values act as templates. Use \"Apply Shared Values to Empty Fields\" to copy them only into blank video fields.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Button("Apply Shared Values to Empty Fields") {
-                                viewModel.applyCommonMetadataToEmptyFields()
-                            }
-                            .disabled(viewModel.isRunning || viewModel.drafts.isEmpty)
-
+        ZStack {
+            NavigationSplitView {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        GroupBox("Connection") {
                             VStack(alignment: .leading, spacing: 10) {
-                                Text("Required Fields")
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(.red)
-                                historyBackedSingleValueField(
-                                    "Location",
-                                    text: $viewModel.commonMetadata.place,
-                                    options: viewModel.historicalOptions.places,
-                                    onSelect: viewModel.selectCommonPlace
-                                )
-                                historyBackedSingleValueField(
-                                    "Event",
-                                    text: $viewModel.commonMetadata.eventName,
-                                    options: viewModel.historicalOptions.eventNames,
-                                    onSelect: viewModel.selectCommonEventName
-                                )
-                                historyBackedSingleValueField(
-                                    "Playlist",
-                                    text: $viewModel.commonMetadata.playlistsText,
-                                    options: viewModel.historicalOptions.playlists,
-                                    onSelect: viewModel.selectCommonPlaylist
-                                )
+                                labeledValue("Workspace", viewModel.environment.workspaceRoot)
+                                labeledValue("CLI", viewModel.environment.cliRelativePath)
+                                labeledValue("Support Dir", viewModel.environment.supportDirectory)
+                                HStack(spacing: 8) {
+                                    Button("Sign Out") {
+                                        Task { await viewModel.signOut() }
+                                    }
+                                    .disabled(viewModel.isRunning || viewModel.authStatus.tokenFile.isEmpty)
+
+                                    Button("Re-authenticate") {
+                                        Task { await viewModel.reauthenticate() }
+                                    }
+                                    .disabled(viewModel.isRunning)
+                                }
                             }
-                            .padding(10)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .fill(Color.red.opacity(0.05))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(Color.red.opacity(0.7), lineWidth: 2)
-                            )
-
-                            participantSelectionField
-                            historyBackedSingleValueField(
-                                "Camera",
-                                text: $viewModel.commonMetadata.cameraModel,
-                                options: viewModel.historicalOptions.cameraModels,
-                                onSelect: viewModel.selectCommonCameraModel
-                            )
-                            sidebarTextField("Library Name", text: $viewModel.commonMetadata.libraryName)
-                            sidebarTextField("Timezone", text: $viewModel.commonMetadata.timezone)
-                            sidebarTextField("OffsetTimeOriginal", text: $viewModel.commonMetadata.offsetTimeOriginal)
-                            sidebarPicker("Video Visibility", selection: $viewModel.commonMetadata.privacyStatus)
-                            sidebarPicker("Playlist Visibility", selection: $viewModel.commonMetadata.playlistPrivacyStatus)
-                            sidebarTextField("Notes", text: $viewModel.commonMetadata.note, axis: .vertical, lineLimit: 3...6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        GroupBox("Authenticated Channel") {
+                            VStack(alignment: .leading, spacing: 10) {
+                                labeledValue("Status", viewModel.authStatus.status)
+                                labeledValue("Channel", viewModel.authStatus.channelTitle)
+                                labeledValue("Handle", viewModel.authStatus.channelHandle)
+                                labeledValue("Channel ID", viewModel.authStatus.channelID)
+                                Button("Refresh Channel") {
+                                    Task { await viewModel.refreshCurrentChannelDetails() }
+                                }
+                                .disabled(viewModel.isRunning || viewModel.authStatus.status != "authenticated")
+                                if !viewModel.authChannelDetailsMessage.isEmpty {
+                                    Text("Channel details unavailable: \(viewModel.authChannelDetailsMessage)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
+                        GroupBox("YouTube Data API") {
+                            youtubeQuotaStatusView
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
+                        GroupBox("Shared Metadata") {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("These values act as templates. Use \"Apply Shared Values to Empty Fields\" to copy them only into blank video fields.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Button("Apply Shared Values to Empty Fields") {
+                                    viewModel.applyCommonMetadataToEmptyFields()
+                                }
+                                .disabled(viewModel.isRunning || viewModel.drafts.isEmpty)
+
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Required Fields")
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                        .foregroundStyle(.red)
+                                    historyBackedSingleValueField(
+                                        "Location",
+                                        text: $viewModel.commonMetadata.place,
+                                        options: viewModel.historicalOptions.places,
+                                        onSelect: viewModel.selectCommonPlace
+                                    )
+                                    historyBackedSingleValueField(
+                                        "Event",
+                                        text: $viewModel.commonMetadata.eventName,
+                                        options: viewModel.historicalOptions.eventNames,
+                                        onSelect: viewModel.selectCommonEventName
+                                    )
+                                    historyBackedSingleValueField(
+                                        "Playlist",
+                                        text: $viewModel.commonMetadata.playlistsText,
+                                        options: viewModel.historicalOptions.playlists,
+                                        onSelect: viewModel.selectCommonPlaylist
+                                    )
+                                }
+                                .padding(10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(Color.red.opacity(0.05))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(Color.red.opacity(0.7), lineWidth: 2)
+                                )
+
+                                participantSelectionField
+                                historyBackedSingleValueField(
+                                    "Camera",
+                                    text: $viewModel.commonMetadata.cameraModel,
+                                    options: viewModel.historicalOptions.cameraModels,
+                                    onSelect: viewModel.selectCommonCameraModel
+                                )
+                                sidebarTextField("Library Name", text: $viewModel.commonMetadata.libraryName)
+                                sidebarTextField("Timezone", text: $viewModel.commonMetadata.timezone)
+                                sidebarTextField("OffsetTimeOriginal", text: $viewModel.commonMetadata.offsetTimeOriginal)
+                                sidebarPicker("Video Visibility", selection: $viewModel.commonMetadata.privacyStatus)
+                                sidebarPicker("Playlist Visibility", selection: $viewModel.commonMetadata.playlistPrivacyStatus)
+                                sidebarTextField("Notes", text: $viewModel.commonMetadata.note, axis: .vertical, lineLimit: 3...6)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
+                    .padding(12)
                 }
-                .padding(12)
+                .navigationSplitViewColumnWidth(min: 290, ideal: 340)
+            } detail: {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        header
+                        Picker("Screen", selection: $selectedScreen) {
+                            ForEach(AppScreen.allCases) { screen in
+                                Text(screen.rawValue).tag(screen)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: selectedScreen) {
+                            guard viewModel.currentScreen != selectedScreen else { return }
+                            DispatchQueue.main.async {
+                                viewModel.currentScreen = selectedScreen
+                            }
+                        }
+
+                        if selectedScreen == .uploader {
+                            uploadedVideoList
+                            videoList
+                            actionBar
+                            if !viewModel.lastError.isEmpty {
+                                Text(viewModel.lastError)
+                                    .foregroundStyle(.red)
+                                    .font(.callout)
+                            }
+                            if !viewModel.verificationReports.isEmpty {
+                                verificationSection
+                            }
+                            logSection
+                        } else if selectedScreen == .photos {
+                            photoLibraryScreen
+                        } else if selectedScreen == .historyCalendar {
+                            historyCalendarScreen
+                        } else {
+                            uploadHistoryScreen
+                        }
+                    }
+                    .padding(20)
+                }
             }
-            .navigationSplitViewColumnWidth(min: 290, ideal: 340)
-        } detail: {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    header
-                    Picker("Screen", selection: $selectedScreen) {
-                        ForEach(AppScreen.allCases) { screen in
-                            Text(screen.rawValue).tag(screen)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .onChange(of: selectedScreen) {
-                        guard viewModel.currentScreen != selectedScreen else { return }
-                        DispatchQueue.main.async {
-                            viewModel.currentScreen = selectedScreen
-                        }
-                    }
 
-                    if selectedScreen == .uploader {
-                        uploadedVideoList
-                        videoList
-                        actionBar
-                        if !viewModel.lastError.isEmpty {
-                            Text(viewModel.lastError)
-                                .foregroundStyle(.red)
-                                .font(.callout)
-                        }
-                        if !viewModel.verificationReports.isEmpty {
-                            verificationSection
-                        }
-                        logSection
-                    } else if selectedScreen == .photos {
-                        photoLibraryScreen
-                    } else if selectedScreen == .historyCalendar {
-                        historyCalendarScreen
-                    } else {
-                        uploadHistoryScreen
+            if viewModel.isRunning {
+                processingOverlay
+                    .transition(.opacity)
+                    .zIndex(1)
+                    .onHover { hovering in
+                        guard hovering else { return }
+                        NSCursor.operationNotAllowed.set()
                     }
-                }
-                .padding(20)
             }
         }
         .task {
             await viewModel.autoRefreshAuthStatusIfNeeded()
+        }
+        .onChange(of: viewModel.isRunning) {
+            updateProcessingCursor()
+        }
+        .onDisappear {
+            if isProcessingCursorActive {
+                NSCursor.pop()
+                isProcessingCursorActive = false
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task {
+                await viewModel.refreshAuthStatusIfIdle()
+            }
         }
         .alert(
             "You Still Have Pending Drafts",
@@ -175,6 +218,38 @@ struct ContentView: View {
                     viewModel.cancelPendingHistoryDeletion()
                 }
             )
+        }
+    }
+
+    private var processingOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.12)
+                .ignoresSafeArea()
+
+            VStack(spacing: 12) {
+                ProgressView()
+                    .controlSize(.large)
+                Text("Processing...")
+                    .font(.headline)
+                Text("Please wait until the current task finishes.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 22)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .shadow(radius: 18, y: 8)
+        }
+    }
+
+    private func updateProcessingCursor() {
+        if viewModel.isRunning {
+            guard !isProcessingCursorActive else { return }
+            NSCursor.operationNotAllowed.push()
+            isProcessingCursorActive = true
+        } else if isProcessingCursorActive {
+            NSCursor.pop()
+            isProcessingCursorActive = false
         }
     }
 
@@ -321,7 +396,19 @@ struct ContentView: View {
                     Task { await viewModel.requestPhotoLibraryAuthorization() }
                 }
                 .disabled(viewModel.isPhotoLibraryBusy)
+                Button("Refresh Cache Size") {
+                    viewModel.refreshPhotoLibraryCacheStatus()
+                }
+                .disabled(viewModel.isRunning || viewModel.isPhotoLibraryBusy)
                 Spacer()
+                Text("Cache: \(viewModel.photoLibraryCacheStatus.summaryText)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if viewModel.photoLibraryFetchFailureCount > 0 {
+                Text("\(viewModel.photoLibraryFetchFailureCount)件の動画取得失敗")
+                    .font(.headline)
+                    .foregroundStyle(.red)
             }
             LazyVGrid(
                 columns: [
@@ -331,7 +418,7 @@ struct ContentView: View {
                 alignment: .leading,
                 spacing: 12
             ) {
-                Button("Select All") {
+                Button("Photo Auto") {
                     viewModel.requestPhotoLibraryAutoWorkflow()
                 }
                 .buttonStyle(.borderedProminent)
@@ -340,19 +427,6 @@ struct ContentView: View {
                     viewModel.isPhotoLibraryAutoRunning ||
                     viewModel.photoLibraryVideos.isEmpty
                 )
-                .alert(item: $viewModel.photoLibraryAutoConfirmation) { confirmation in
-                    Alert(
-                        title: Text(confirmation.title),
-                        message: Text(confirmation.message),
-                        primaryButton: .default(Text("Run")) {
-                            viewModel.photoLibraryAutoConfirmation = nil
-                            Task { await viewModel.runPhotoLibraryAutoWorkflow() }
-                        },
-                        secondaryButton: .cancel {
-                            viewModel.photoLibraryAutoConfirmation = nil
-                        }
-                    )
-                }
 
                 Button("Upload Vlog") {
                     viewModel.applyVlogPhotoLibraryPreset()
@@ -425,6 +499,11 @@ struct ContentView: View {
                     viewModel.selectedPhotoLibraryVideoIDs.isEmpty
                 )
 
+                Button("Delete Cached Files") {
+                    viewModel.requestPhotoLibraryCacheDeletion()
+                }
+                .disabled(!viewModel.canClearPhotoLibraryCache || viewModel.photoLibraryCacheStatus.fileCount == 0)
+
                 Button("Add Selected Videos to Upload Queue") {
                     viewModel.addSelectedPhotoLibraryVideosToDrafts()
                 }
@@ -459,6 +538,41 @@ struct ContentView: View {
                             )
                         }
                     }
+                }
+            }
+            .alert(item: $viewModel.photoLibraryAlertState) { state in
+                switch state {
+                case .autoConfirmation(let confirmation):
+                    Alert(
+                        title: Text(confirmation.title),
+                        message: Text(confirmation.message),
+                        primaryButton: .default(Text("Run")) {
+                            viewModel.photoLibraryAlertState = nil
+                            Task { await viewModel.runPhotoLibraryAutoWorkflow() }
+                        },
+                        secondaryButton: .cancel {
+                            viewModel.photoLibraryAlertState = nil
+                        }
+                    )
+                case .autoBlocked(let blocked):
+                    Alert(
+                        title: Text(blocked.title),
+                        message: Text(blocked.message),
+                        dismissButton: .default(Text("OK")) {
+                            viewModel.photoLibraryAlertState = nil
+                        }
+                    )
+                case .cacheDeletion(let confirmation):
+                    Alert(
+                        title: Text(confirmation.title),
+                        message: Text(confirmation.message),
+                        primaryButton: .destructive(Text("Delete")) {
+                            Task { await viewModel.clearPhotoLibraryCacheConfirmed() }
+                        },
+                        secondaryButton: .cancel {
+                            viewModel.photoLibraryAlertState = nil
+                        }
+                    )
                 }
             }
             logSection

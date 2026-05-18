@@ -6,8 +6,10 @@ import Photos
 protocol PhotoLibraryServicing: Sendable {
     func authorizationStatus() -> PhotoLibraryAuthorizationStatus
     func requestAuthorization() async -> PhotoLibraryAuthorizationStatus
-    func fetchVideos(on targetDate: Date) async throws -> [PhotoLibraryVideoItem]
+    func fetchVideos(on targetDate: Date) async throws -> PhotoLibraryFetchResult
     func deleteVideos(withIDs ids: [String]) async throws
+    func photoLibraryCacheStatus() throws -> PhotoLibraryCacheStatus
+    func clearPhotoLibraryCache() throws
 }
 
 struct PhotoLibraryVideoItem: Identifiable, Equatable {
@@ -18,6 +20,37 @@ struct PhotoLibraryVideoItem: Identifiable, Equatable {
     let durationSeconds: Int
     let durationText: String
     let thumbnailPNGData: Data?
+}
+
+struct PhotoLibraryFetchFailure: Equatable {
+    let assetIdentifier: String
+    let fileName: String
+    let message: String
+}
+
+struct PhotoLibraryFetchResult: Equatable {
+    let items: [PhotoLibraryVideoItem]
+    let failures: [PhotoLibraryFetchFailure]
+}
+
+struct PhotoLibraryCacheStatus: Equatable {
+    let fileCount: Int
+    let totalBytes: Int64
+
+    var sizeText: String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useGB, .useMB, .useKB]
+        formatter.countStyle = .file
+        formatter.includesUnit = true
+        formatter.isAdaptive = true
+        return formatter.string(fromByteCount: totalBytes)
+    }
+
+    var summaryText: String {
+        "\(fileCount) item(s) / \(sizeText)"
+    }
+
+    static let empty = PhotoLibraryCacheStatus(fileCount: 0, totalBytes: 0)
 }
 
 enum PhotoLibraryAuthorizationStatus: Equatable {
@@ -67,31 +100,51 @@ struct PhotoLibraryService {
         return Self.mapAuthorizationStatus(status)
     }
 
-    func fetchVideos(on targetDate: Date) async throws -> [PhotoLibraryVideoItem] {
+    func fetchVideos(on targetDate: Date) async throws -> PhotoLibraryFetchResult {
         let status = authorizationStatus()
         guard status == .granted || status == .limited else {
             throw PhotoLibraryServiceError.accessDenied
         }
 
-        let options = PHFetchOptions()
-        options.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.video.rawValue)
-        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-
         var calendar = Calendar.autoupdatingCurrent
         calendar.timeZone = .autoupdatingCurrent
+        guard let dayInterval = calendar.dateInterval(of: .day, for: targetDate) else {
+            return PhotoLibraryFetchResult(items: [], failures: [])
+        }
+
+        let options = PHFetchOptions()
+        options.predicate = NSPredicate(
+            format: "creationDate >= %@ AND creationDate < %@",
+            dayInterval.start as NSDate,
+            dayInterval.end as NSDate
+        )
+        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+
         let assets = PHAsset.fetchAssets(with: options)
         var items: [PhotoLibraryVideoItem] = []
+        var failures: [PhotoLibraryFetchFailure] = []
         for index in 0 ..< assets.count {
             let asset = assets.object(at: index)
-            guard let creationDate = asset.creationDate,
-                  calendar.isDate(creationDate, inSameDayAs: targetDate) else {
-                continue
-            }
-            if let item = try await buildItem(from: asset) {
-                items.append(item)
+            let resources = PHAssetResource.assetResources(for: asset)
+            guard isVideoLikeAsset(asset, resources: resources) else { continue }
+
+            let captureDate = asset.creationDate ?? asset.modificationDate ?? targetDate
+            do {
+                if let item = try await buildItem(from: asset, resources: resources, captureDate: captureDate) {
+                    items.append(item)
+                }
+            } catch {
+                let fileName = resources.first?.originalFilename ?? asset.localIdentifier.replacingOccurrences(of: "/", with: "_")
+                failures.append(
+                    PhotoLibraryFetchFailure(
+                        assetIdentifier: asset.localIdentifier,
+                        fileName: fileName,
+                        message: describeFetchError(error)
+                    )
+                )
             }
         }
-        return items
+        return PhotoLibraryFetchResult(items: items, failures: failures)
     }
 
     func deleteVideos(withIDs ids: [String]) async throws {
@@ -116,10 +169,46 @@ struct PhotoLibraryService {
         try await performPhotoLibraryDeletion(assetIdentifiers: assetIdentifiers)
     }
 
-    private func buildItem(from asset: PHAsset) async throws -> PhotoLibraryVideoItem? {
-        let resources = PHAssetResource.assetResources(for: asset)
+    func photoLibraryCacheStatus() throws -> PhotoLibraryCacheStatus {
+        let root = photoLibraryCacheDirectory()
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: root.path) else {
+            return .empty
+        }
+
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .fileSizeKey, .totalFileAllocatedSizeKey]
+        let enumerator = fileManager.enumerator(
+            at: root,
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsHiddenFiles]
+        )
+
+        var fileCount = 0
+        var totalBytes: Int64 = 0
+        while let url = enumerator?.nextObject() as? URL {
+            let values = try url.resourceValues(forKeys: keys)
+            guard values.isRegularFile == true else { continue }
+            fileCount += 1
+            totalBytes += Int64(values.totalFileAllocatedSize ?? values.fileSize ?? 0)
+        }
+
+        return PhotoLibraryCacheStatus(fileCount: fileCount, totalBytes: totalBytes)
+    }
+
+    func clearPhotoLibraryCache() throws {
+        let root = photoLibraryCacheDirectory()
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: root.path) else { return }
+        try fileManager.removeItem(at: root)
+    }
+
+    private func buildItem(
+        from asset: PHAsset,
+        resources: [PHAssetResource],
+        captureDate: Date
+    ) async throws -> PhotoLibraryVideoItem? {
         let fileName = resources.first?.originalFilename ?? asset.localIdentifier.replacingOccurrences(of: "/", with: "_")
-        guard let fileURL = try await exportVideoToCache(for: asset, suggestedFileName: fileName) else {
+        guard let fileURL = try await exportVideoToCache(for: asset, resources: resources, suggestedFileName: fileName) else {
             return nil
         }
         let thumbnailPNGData = await generateThumbnailPNGData(for: fileURL)
@@ -127,20 +216,37 @@ struct PhotoLibraryService {
             id: asset.localIdentifier,
             filePath: fileURL.path,
             fileName: fileName,
-            captureDate: asset.creationDate ?? Date(),
+            captureDate: captureDate,
             durationSeconds: Int(asset.duration.rounded()),
             durationText: formatDuration(asset.duration),
             thumbnailPNGData: thumbnailPNGData
         )
     }
 
-    private func exportVideoToCache(for asset: PHAsset, suggestedFileName: String) async throws -> URL? {
+    private func describeFetchError(_ error: Error) -> String {
+        let nsError = error as NSError
+        if nsError.domain == "CloudPhotoLibraryErrorDomain" && nsError.code == 1005 {
+            return "Download from iCloud Photos was interrupted."
+        }
+        if nsError.domain == "PHPhotosErrorDomain" {
+            return "Photos request failed (\(nsError.code))."
+        }
+        let localized = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        return localized.isEmpty ? "Unknown photo library error." : localized
+    }
+
+    private func exportVideoToCache(
+        for asset: PHAsset,
+        resources: [PHAssetResource],
+        suggestedFileName: String
+    ) async throws -> URL? {
         let exportURL = try makeCachedVideoURL(assetIdentifier: asset.localIdentifier, suggestedFileName: suggestedFileName)
         if FileManager.default.fileExists(atPath: exportURL.path) {
             return exportURL
         }
 
-        if let directURL = try await requestVideoURL(for: asset),
+        if asset.mediaType == .video,
+           let directURL = try await requestVideoURL(for: asset),
            FileManager.default.isReadableFile(atPath: directURL.path) {
             do {
                 try copyDirectVideoURL(directURL, to: exportURL)
@@ -150,13 +256,23 @@ struct PhotoLibraryService {
             }
         }
 
-        guard let resource = PHAssetResource.assetResources(for: asset).first(where: { $0.type == .video || $0.type == .fullSizeVideo }) ??
-                PHAssetResource.assetResources(for: asset).first else {
+        guard let resource = preferredVideoResource(from: resources) ?? resources.first else {
             throw PhotoLibraryServiceError.assetNotFound
         }
 
         try await writeAssetResource(resource, to: exportURL)
         return exportURL
+    }
+
+    private func isVideoLikeAsset(_ asset: PHAsset, resources: [PHAssetResource]) -> Bool {
+        if asset.mediaType == .video {
+            return true
+        }
+        return preferredVideoResource(from: resources) != nil
+    }
+
+    private func preferredVideoResource(from resources: [PHAssetResource]) -> PHAssetResource? {
+        resources.first(where: { $0.type == .video || $0.type == .fullSizeVideo || $0.type == .pairedVideo })
     }
 
     private func requestVideoURL(for asset: PHAsset) async throws -> URL? {
@@ -220,17 +336,22 @@ struct PhotoLibraryService {
 
     private func makeCachedVideoURL(assetIdentifier: String, suggestedFileName: String) throws -> URL {
         let fileManager = FileManager.default
-        let cachesDirectory = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first ??
-            fileManager.temporaryDirectory
-        let root = cachesDirectory
-            .appendingPathComponent("iPhoto2YouTube", isDirectory: true)
-            .appendingPathComponent("PhotoLibraryVideos", isDirectory: true)
+        let root = photoLibraryCacheDirectory()
         try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
 
         let ext = URL(fileURLWithPath: suggestedFileName).pathExtension
         let sanitizedIdentifier = assetIdentifier.replacingOccurrences(of: "/", with: "_")
         let outputName = ext.isEmpty ? sanitizedIdentifier : "\(sanitizedIdentifier).\(ext)"
         return root.appendingPathComponent(outputName, isDirectory: false)
+    }
+
+    private func photoLibraryCacheDirectory() -> URL {
+        let fileManager = FileManager.default
+        let cachesDirectory = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first ??
+            fileManager.temporaryDirectory
+        return cachesDirectory
+            .appendingPathComponent("iPhoto2YouTube", isDirectory: true)
+            .appendingPathComponent("PhotoLibraryVideos", isDirectory: true)
     }
 
     private func performPhotoLibraryChanges(_ changes: @escaping () -> Void) async throws {

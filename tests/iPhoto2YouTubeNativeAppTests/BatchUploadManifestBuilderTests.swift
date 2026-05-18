@@ -379,6 +379,7 @@ final class BatchUploadManifestBuilderTests: XCTestCase {
     @MainActor
     func testDeleteSelectedPhotoLibraryVideosRemovesItemsAndClearsSelection() async {
         let service = MockPhotoLibraryService()
+        service.cacheStatus = PhotoLibraryCacheStatus(fileCount: 2, totalBytes: 2_048)
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let environment = NativeAppEnvironment(
@@ -432,6 +433,64 @@ final class BatchUploadManifestBuilderTests: XCTestCase {
         XCTAssertEqual(viewModel.photoDeletionHistoryEntries.first?.category, "Other")
         viewModel.selectHistoryCalendarDate(Date(timeIntervalSince1970: 0))
         XCTAssertEqual(viewModel.selectedDateDeletionCounts.other, 1)
+        XCTAssertEqual(viewModel.photoLibraryCacheStatus.fileCount, 2)
+    }
+
+    @MainActor
+    func testDeleteCachedFilesClearsLoadedItemsWhenQueueIsEmpty() async {
+        let service = MockPhotoLibraryService()
+        service.cacheStatus = PhotoLibraryCacheStatus(fileCount: 3, totalBytes: 4_096)
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let environment = NativeAppEnvironment(
+            workspaceRoot: root.path,
+            cliRelativePath: ".venv/bin/iphoto2youtube",
+            supportDirectory: ".iphoto2youtube"
+        )
+        let viewModel = AppViewModel(environment: environment, photoLibraryService: service)
+        viewModel.photoLibraryVideos = [
+            PhotoLibraryVideoItem(
+                id: "cached",
+                filePath: "/tmp/cached.mp4",
+                fileName: "cached.mp4",
+                captureDate: Date(timeIntervalSince1970: 0),
+                durationSeconds: 10,
+                durationText: "00:10",
+                thumbnailPNGData: nil
+            )
+        ]
+        viewModel.selectedPhotoLibraryVideoIDs = ["cached"]
+        viewModel.refreshPhotoLibraryCacheStatus()
+
+        viewModel.requestPhotoLibraryCacheDeletion()
+        guard case .cacheDeletion = viewModel.photoLibraryAlertState else {
+            return XCTFail("Expected cache deletion alert state")
+        }
+
+        await viewModel.clearPhotoLibraryCacheConfirmed()
+
+        XCTAssertEqual(service.clearCacheCallCount, 1)
+        XCTAssertTrue(viewModel.photoLibraryVideos.isEmpty)
+        XCTAssertTrue(viewModel.selectedPhotoLibraryVideoIDs.isEmpty)
+        XCTAssertEqual(viewModel.photoLibraryCacheStatus, .empty)
+        XCTAssertTrue(viewModel.logOutput.contains("Deleted photo library cache: 3 item(s)"))
+    }
+
+    @MainActor
+    func testDeleteCachedFilesRequiresEmptyUploadQueue() {
+        let service = MockPhotoLibraryService()
+        service.cacheStatus = PhotoLibraryCacheStatus(fileCount: 1, totalBytes: 512)
+        let draft = VideoDraft(filePath: "/tmp/in-use.mp4", captureDate: Date(timeIntervalSince1970: 0))
+        let viewModel = AppViewModel(drafts: [draft], photoLibraryService: service)
+
+        viewModel.requestPhotoLibraryCacheDeletion()
+
+        XCTAssertNil(viewModel.photoLibraryAlertState)
+        XCTAssertEqual(service.clearCacheCallCount, 0)
+        XCTAssertEqual(
+            viewModel.lastError,
+            "Clear the upload queue and wait for current photo library tasks to finish before deleting cached files."
+        )
     }
 
     @MainActor
@@ -670,10 +729,13 @@ final class BatchUploadManifestBuilderTests: XCTestCase {
 
         viewModel.requestPhotoLibraryAutoWorkflow()
 
-        XCTAssertEqual(viewModel.photoLibraryAutoConfirmation?.title, "Run Photo Auto?")
-        XCTAssertTrue(viewModel.photoLibraryAutoConfirmation?.message.contains("Capture date: 2026-04-07") == true)
-        XCTAssertTrue(viewModel.photoLibraryAutoConfirmation?.message.contains("Upload Vlog (.mp4)") == true)
-        XCTAssertTrue(viewModel.photoLibraryAutoConfirmation?.message.contains("If an error occurs, the workflow stops at that point.") == true)
+        guard case .autoConfirmation(let confirmation) = viewModel.photoLibraryAlertState else {
+            return XCTFail("Expected photo auto confirmation alert state")
+        }
+        XCTAssertEqual(confirmation.title, "Run Photo Auto?")
+        XCTAssertTrue(confirmation.message.contains("Capture date: 2026-04-07"))
+        XCTAssertTrue(confirmation.message.contains("Upload Vlog (.mp4)"))
+        XCTAssertTrue(confirmation.message.contains("If an error occurs, the workflow stops at that point."))
     }
 
     @MainActor
@@ -693,7 +755,11 @@ final class BatchUploadManifestBuilderTests: XCTestCase {
 
         viewModel.requestPhotoLibraryAutoWorkflow()
 
-        XCTAssertNil(viewModel.photoLibraryAutoConfirmation)
+        guard case .autoBlocked(let blocked) = viewModel.photoLibraryAlertState else {
+            return XCTFail("Expected blocked photo auto alert state")
+        }
+        XCTAssertEqual(blocked.title, "Photo Auto Not Ready")
+        XCTAssertTrue(blocked.message.contains("Enter the required field \"Location\""))
         XCTAssertEqual(viewModel.lastError, "Enter the required field \"Location\" on the left before running Photo Auto.")
     }
 
@@ -765,7 +831,9 @@ final class BatchUploadManifestBuilderTests: XCTestCase {
         viewModel.requestPhotoLibraryAutoWorkflow()
         await viewModel.runPhotoLibraryAutoWorkflow()
 
-        XCTAssertFalse(viewModel.photoLibraryAutoConfirmation?.message.contains("Upload Vlog (.mp4)") ?? false)
+        if case .autoConfirmation(let confirmation) = viewModel.photoLibraryAlertState {
+            XCTAssertFalse(confirmation.message.contains("Upload Vlog (.mp4)"))
+        }
         XCTAssertEqual(cliService.batchUploadCallCount, 0)
         XCTAssertTrue(viewModel.drafts.isEmpty)
         XCTAssertTrue(viewModel.lastError.isEmpty)
@@ -1204,7 +1272,10 @@ private final class MockPhotoLibraryService: PhotoLibraryServicing, @unchecked S
     var deletedIDs: [[String]] = []
     var fetchedVideos: [PhotoLibraryVideoItem] = []
     var fetchedVideosResponses: [[PhotoLibraryVideoItem]] = []
+    var fetchedVideoFailures: [PhotoLibraryFetchFailure] = []
     var fetchVideosCallCount = 0
+    var cacheStatus: PhotoLibraryCacheStatus = .empty
+    var clearCacheCallCount = 0
 
     func authorizationStatus() -> PhotoLibraryAuthorizationStatus {
         authorizationStatusValue
@@ -1214,16 +1285,25 @@ private final class MockPhotoLibraryService: PhotoLibraryServicing, @unchecked S
         requestAuthorizationResult
     }
 
-    func fetchVideos(on targetDate: Date) async throws -> [PhotoLibraryVideoItem] {
+    func fetchVideos(on targetDate: Date) async throws -> PhotoLibraryFetchResult {
         fetchVideosCallCount += 1
         if !fetchedVideosResponses.isEmpty {
-            return fetchedVideosResponses.removeFirst()
+            return PhotoLibraryFetchResult(items: fetchedVideosResponses.removeFirst(), failures: fetchedVideoFailures)
         }
-        return fetchedVideos
+        return PhotoLibraryFetchResult(items: fetchedVideos, failures: fetchedVideoFailures)
     }
 
     func deleteVideos(withIDs ids: [String]) async throws {
         deletedIDs.append(ids.sorted())
+    }
+
+    func photoLibraryCacheStatus() throws -> PhotoLibraryCacheStatus {
+        cacheStatus
+    }
+
+    func clearPhotoLibraryCache() throws {
+        clearCacheCallCount += 1
+        cacheStatus = .empty
     }
 }
 
@@ -1234,6 +1314,7 @@ private final class MockCLIService: CLIServicing, @unchecked Sendable {
     var refreshAuthStatusCallCount = 0
     var fetchCurrentChannelCallCount = 0
     var loginCallCount = 0
+    var logoutCallCount = 0
     var refreshAuthStatusResult: ChannelStatus = .unknown
     var fetchCurrentChannelResult: ChannelStatus = .unknown
     var loginResult: ChannelStatus = .unknown
@@ -1251,6 +1332,10 @@ private final class MockCLIService: CLIServicing, @unchecked Sendable {
     func login(environment: NativeAppEnvironment) async throws -> ChannelStatus {
         loginCallCount += 1
         return loginResult
+    }
+
+    func logout(environment: NativeAppEnvironment) async throws {
+        logoutCallCount += 1
     }
 
     func runBatchUpload(

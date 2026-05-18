@@ -8,11 +8,12 @@ final class AppViewModel: ObservableObject {
     @Published var commonMetadata: CommonMetadata
     @Published var drafts: [VideoDraft]
     @Published var authStatus: ChannelStatus
+    @Published var authChannelDetailsMessage: String
     @Published var logOutput: String
     @Published var isRunning: Bool
     @Published var lastError: String
     @Published var uploadConfirmation: UploadConfirmationState?
-    @Published var photoLibraryAutoConfirmation: PhotoLibraryAutoConfirmationState?
+    @Published var photoLibraryAlertState: PhotoLibraryAlertState?
     @Published var verificationReports: [UploadVerificationReport]
     @Published var uploadedVideos: [UploadedVideoRecord]
     @Published var uploadHistoryEntries: [UploadHistoryEntry]
@@ -22,7 +23,9 @@ final class AppViewModel: ObservableObject {
     @Published var isPhotoLibraryAutoRunning: Bool
     @Published var selectedPhotoLibraryDate: Date
     @Published var photoLibraryVideos: [PhotoLibraryVideoItem]
+    @Published var photoLibraryFetchFailureCount: Int
     @Published var selectedPhotoLibraryVideoIDs: Set<String>
+    @Published var photoLibraryCacheStatus: PhotoLibraryCacheStatus
     @Published var selectedHistoryVideoIDs: Set<String>
     @Published var pendingHistoryDeletionMode: HistoryDeletionMode?
     @Published var historyDisplayLimit: Int
@@ -62,13 +65,14 @@ final class AppViewModel: ObservableObject {
         self.commonMetadata = commonMetadata
         self.drafts = drafts
         self.authStatus = authStatus
+        self.authChannelDetailsMessage = ""
         self.cliService = cliService
         self.photoLibraryService = photoLibraryService
         self.logOutput = ""
         self.isRunning = false
         self.lastError = ""
         self.uploadConfirmation = nil
-        self.photoLibraryAutoConfirmation = nil
+        self.photoLibraryAlertState = nil
         self.verificationReports = []
         self.uploadedVideos = []
         self.uploadHistoryEntries = []
@@ -78,7 +82,9 @@ final class AppViewModel: ObservableObject {
         self.isPhotoLibraryAutoRunning = false
         self.selectedPhotoLibraryDate = Date()
         self.photoLibraryVideos = []
+        self.photoLibraryFetchFailureCount = 0
         self.selectedPhotoLibraryVideoIDs = []
+        self.photoLibraryCacheStatus = .empty
         self.selectedHistoryVideoIDs = []
         self.pendingHistoryDeletionMode = nil
         self.historyDisplayLimit = 10
@@ -392,8 +398,22 @@ final class AppViewModel: ObservableObject {
 
     func refreshAuthStatus() async {
         await runTask(label: "auth-status") {
+            let previousChannelID = authStatus.channelID
+            let previousChannelTitle = authStatus.channelTitle
+            let previousChannelHandle = authStatus.channelHandle
             let status = try await cliService.refreshAuthStatus(environment: environment)
             authStatus = status
+            if status.status == "authenticated" {
+                if authStatus.channelID.isEmpty {
+                    authStatus.channelID = previousChannelID
+                }
+                if authStatus.channelTitle.isEmpty {
+                    authStatus.channelTitle = previousChannelTitle
+                }
+                if authStatus.channelHandle.isEmpty {
+                    authStatus.channelHandle = previousChannelHandle
+                }
+            }
             if status.channelTitle.isEmpty {
                 appendLog("Refreshed auth status: \(status.status)")
             } else {
@@ -403,6 +423,36 @@ final class AppViewModel: ObservableObject {
             Task {
                 await refreshCurrentChannelDetails()
             }
+        }
+    }
+
+    func refreshAuthStatusIfIdle() async {
+        guard !isRunning else { return }
+        await refreshAuthStatus()
+    }
+
+    func signOut() async {
+        await runTask(label: "auth-logout") {
+            try await cliService.logout(environment: environment)
+            authStatus = .unknown
+            authStatus.status = "unauthenticated"
+            authChannelDetailsMessage = ""
+            appendLog("Signed out from YouTube authentication.")
+        }
+    }
+
+    func reauthenticate() async {
+        await runTask(label: "auth-reauthenticate") {
+            try await cliService.logout(environment: environment)
+            authStatus = .unknown
+            authStatus.status = "unauthenticated"
+            authChannelDetailsMessage = ""
+            appendLog("Starting Google sign-in again. Complete the flow in your browser.")
+            let status = try await cliService.login(environment: environment)
+            authStatus = status
+            authChannelDetailsMessage = ""
+            appendLog("Google sign-in completed: \(status.channelTitle) \(status.channelHandle)")
+            await refreshCurrentChannelDetails()
         }
     }
 
@@ -423,19 +473,23 @@ final class AppViewModel: ObservableObject {
             appendLog("Not authenticated. Starting Google sign-in. Complete the flow in your browser.")
             let status = try await cliService.login(environment: environment)
             authStatus = status
+            authChannelDetailsMessage = ""
             appendLog("Google sign-in completed: \(status.channelTitle) \(status.channelHandle)")
+            await refreshCurrentChannelDetails()
         }
     }
 
-    private func refreshCurrentChannelDetails() async {
+    func refreshCurrentChannelDetails() async {
         do {
             let channel = try await cliService.fetchCurrentChannel(environment: environment)
             guard authStatus.status == "authenticated" else { return }
             authStatus.channelID = channel.channelID
             authStatus.channelTitle = channel.channelTitle
             authStatus.channelHandle = channel.channelHandle
+            authChannelDetailsMessage = ""
             appendLog("Fetched authenticated channel: \(channel.channelTitle) \(channel.channelHandle)")
         } catch {
+            authChannelDetailsMessage = error.localizedDescription
             appendLog("Failed to fetch the authenticated channel: \(error.localizedDescription)")
         }
     }
@@ -448,6 +502,7 @@ final class AppViewModel: ObservableObject {
         await Task.yield()
         await refreshUploadHistory(resetLimit: true)
         await refreshHistoryCalendarData()
+        refreshPhotoLibraryCacheStatus()
         let authorizationStatus = photoLibraryService.authorizationStatus()
         if photoLibraryAuthorizationStatus != authorizationStatus {
             photoLibraryAuthorizationStatus = authorizationStatus
@@ -475,20 +530,33 @@ final class AppViewModel: ObservableObject {
         guard !isPhotoLibraryBusy else { return }
         isPhotoLibraryBusy = true
         defer { isPhotoLibraryBusy = false }
-        await runTask(label: "photo-library") {
-            photoLibraryVideos = try await photoLibraryService.fetchVideos(on: selectedPhotoLibraryDate)
-            let validIDs = Set(photoLibraryVideos.map(\.id))
-            selectedPhotoLibraryVideoIDs = selectedPhotoLibraryVideoIDs.intersection(validIDs)
+        isRunning = true
+        lastError = ""
+        photoLibraryFetchFailureCount = 0
+        appendLog("Started: photo-library")
+        do {
+            let result = try await photoLibraryService.fetchVideos(on: selectedPhotoLibraryDate)
+            applyPhotoLibraryFetchResult(result)
             let dateText = Self.selectedDateFormatter.string(from: selectedPhotoLibraryDate)
             appendLog("Photo library load result: \(dateText) / \(photoLibraryVideos.count) item(s)")
             if photoLibraryVideos.isEmpty {
                 if photoLibraryAuthorizationStatus == .limited {
                     appendLog("Access is limited. The target videos may not be included in the allowed set.")
+                } else if photoLibraryFetchFailureCount > 0 {
+                    appendLog("Videos were found, but none could be loaded successfully. Open the items in Photos and retry after iCloud downloads complete.")
                 } else {
                     appendLog("No videos were found for the selected date. Check whether the capture date may fall on a different day.")
                 }
             }
+            refreshPhotoLibraryCacheStatus()
+            appendLog("Completed: photo-library")
+        } catch {
+            photoLibraryFetchFailureCount = 0
+            let message = describePhotoLibraryLoadError(error)
+            lastError = message
+            appendLog("Error: \(message)")
         }
+        isRunning = false
     }
 
     func togglePhotoLibraryVideoSelection(_ id: String) {
@@ -510,23 +578,82 @@ final class AppViewModel: ObservableObject {
 
         await runTask(label: "delete-photo-library-videos") {
             try await photoLibraryService.deleteVideos(withIDs: targetIDs)
-            photoLibraryVideos = try await photoLibraryService.fetchVideos(on: selectedPhotoLibraryDate)
-            let validIDs = Set(photoLibraryVideos.map(\.id))
-            selectedPhotoLibraryVideoIDs = selectedPhotoLibraryVideoIDs.intersection(validIDs)
+            let result = try await photoLibraryService.fetchVideos(on: selectedPhotoLibraryDate)
+            applyPhotoLibraryFetchResult(result)
 
             let removedNames = targets.map(\.fileName).sorted()
             let summary = removedNames.isEmpty ? "\(targetIDs.count) item(s)" : removedNames.joined(separator: ", ")
             appendLog("Deleted videos from iPhoto: \(summary)")
             try recordPhotoLibraryDeletionEvent(for: targets)
+            refreshPhotoLibraryCacheStatus()
+        }
+    }
+
+    var canClearPhotoLibraryCache: Bool {
+        !isRunning && !isPhotoLibraryBusy && !isPhotoLibraryAutoRunning && drafts.isEmpty
+    }
+
+    func refreshPhotoLibraryCacheStatus() {
+        do {
+            photoLibraryCacheStatus = try photoLibraryService.photoLibraryCacheStatus()
+        } catch {
+            lastError = error.localizedDescription
+            appendLog("Failed to inspect the photo library cache: \(error.localizedDescription)")
+        }
+    }
+
+    func requestPhotoLibraryCacheDeletion() {
+        guard canClearPhotoLibraryCache else {
+            lastError = "Clear the upload queue and wait for current photo library tasks to finish before deleting cached files."
+            return
+        }
+
+        lastError = ""
+        photoLibraryAlertState = .cacheDeletion(
+            PhotoLibraryCacheDeletionConfirmationState(
+                title: "Delete Photo Cache?",
+                message: [
+                    "Cached files: \(photoLibraryCacheStatus.summaryText)",
+                    "",
+                    "This removes only copied files under ~/Library/Caches/iPhoto2YouTube/PhotoLibraryVideos.",
+                    "Photos originals stay in iPhoto/Photos.",
+                    "",
+                    "After deletion, click Load again when you need these videos."
+                ].joined(separator: "\n")
+            )
+        )
+    }
+
+    func clearPhotoLibraryCacheConfirmed() async {
+        guard canClearPhotoLibraryCache else { return }
+        let previousStatus = photoLibraryCacheStatus
+        photoLibraryAlertState = nil
+        await runTask(label: "clear-photo-library-cache") {
+            try photoLibraryService.clearPhotoLibraryCache()
+            photoLibraryVideos = []
+            selectedPhotoLibraryVideoIDs.removeAll()
+            photoLibraryFetchFailureCount = 0
+            refreshPhotoLibraryCacheStatus()
+            appendLog("Deleted photo library cache: \(previousStatus.summaryText). Click Load to recreate files when needed.")
         }
     }
 
     func requestPhotoLibraryAutoWorkflow() {
-        guard validatePhotoLibraryAutoWorkflowPreconditions() else { return }
+        guard validatePhotoLibraryAutoWorkflowPreconditions() else {
+            photoLibraryAlertState = .autoBlocked(
+                PhotoLibraryAutoBlockedState(
+                    title: "Photo Auto Not Ready",
+                    message: lastError
+                )
+            )
+            return
+        }
 
-        photoLibraryAutoConfirmation = PhotoLibraryAutoConfirmationState(
-            title: "Run Photo Auto?",
-            message: buildPhotoLibraryAutoConfirmationMessage()
+        photoLibraryAlertState = .autoConfirmation(
+            PhotoLibraryAutoConfirmationState(
+                title: "Run Photo Auto?",
+                message: buildPhotoLibraryAutoConfirmationMessage()
+            )
         )
     }
 
@@ -1242,6 +1369,30 @@ final class AppViewModel: ObservableObject {
             logOutput += "\n\n"
         }
         logOutput += message
+    }
+
+    private func applyPhotoLibraryFetchResult(_ result: PhotoLibraryFetchResult) {
+        photoLibraryVideos = result.items
+        photoLibraryFetchFailureCount = result.failures.count
+        let validIDs = Set(photoLibraryVideos.map(\.id))
+        selectedPhotoLibraryVideoIDs = selectedPhotoLibraryVideoIDs.intersection(validIDs)
+
+        guard !result.failures.isEmpty else { return }
+        appendLog("Failed to load \(result.failures.count) photo library video(s).")
+        for failure in result.failures {
+            appendLog("Photo library fetch failed: \(failure.fileName) [\(failure.assetIdentifier)] / \(failure.message)")
+        }
+    }
+
+    private func describePhotoLibraryLoadError(_ error: Error) -> String {
+        let nsError = error as NSError
+        if nsError.domain == "CloudPhotoLibraryErrorDomain" && nsError.code == 1005 {
+            return "Photos library video download failed. The item may be stored in iCloud Photos and the network connection was interrupted. Open the Photos app, make sure the video can be played locally, and retry."
+        }
+        if nsError.domain == "PHPhotosErrorDomain" {
+            return "Photos library request failed (\(nsError.code)). The asset may require iCloud download, additional Photos access, or a stable local photo library connection."
+        }
+        return error.localizedDescription
     }
 
     private func buildUploadConfirmationMessage() -> String {

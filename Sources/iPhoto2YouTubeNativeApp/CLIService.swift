@@ -33,6 +33,7 @@ protocol CLIServicing: Sendable {
     func refreshAuthStatus(environment: NativeAppEnvironment) async throws -> ChannelStatus
     func fetchCurrentChannel(environment: NativeAppEnvironment) async throws -> ChannelStatus
     func login(environment: NativeAppEnvironment) async throws -> ChannelStatus
+    func logout(environment: NativeAppEnvironment) async throws
     func runBatchUpload(
         manifestURL: URL,
         dryRun: Bool,
@@ -76,6 +77,10 @@ struct CLIService: CLIServicing {
     func login(environment: NativeAppEnvironment) async throws -> ChannelStatus {
         let decoded = try await runJSON(arguments: ["auth-login"], environment: environment)
         return channelStatus(from: decoded)
+    }
+
+    func logout(environment: NativeAppEnvironment) async throws {
+        _ = try await runJSON(arguments: ["auth-logout"], environment: environment)
     }
 
     private func channelStatus(from decoded: [String: Any]) -> ChannelStatus {

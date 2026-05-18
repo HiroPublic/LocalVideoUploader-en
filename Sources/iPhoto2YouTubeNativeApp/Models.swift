@@ -134,6 +134,35 @@ struct PhotoLibraryAutoConfirmationState: Equatable, Identifiable {
     var message: String
 }
 
+struct PhotoLibraryAutoBlockedState: Equatable, Identifiable {
+    var id: String { title + "\n" + message }
+    var title: String
+    var message: String
+}
+
+struct PhotoLibraryCacheDeletionConfirmationState: Equatable, Identifiable {
+    var id: String { title + "\n" + message }
+    var title: String
+    var message: String
+}
+
+enum PhotoLibraryAlertState: Identifiable, Equatable {
+    case autoConfirmation(PhotoLibraryAutoConfirmationState)
+    case autoBlocked(PhotoLibraryAutoBlockedState)
+    case cacheDeletion(PhotoLibraryCacheDeletionConfirmationState)
+
+    var id: String {
+        switch self {
+        case .autoConfirmation(let state):
+            return "auto-confirmation:\(state.id)"
+        case .autoBlocked(let state):
+            return "auto-blocked:\(state.id)"
+        case .cacheDeletion(let state):
+            return "cache-deletion:\(state.id)"
+        }
+    }
+}
+
 struct BatchUploadSummary: Equatable {
     var total: Int
     var uploadedCount: Int
