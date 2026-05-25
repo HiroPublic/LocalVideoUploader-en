@@ -1299,6 +1299,15 @@ struct NativeAppEnvironment: Equatable, Sendable {
     var cliRelativePath: String
     var supportDirectory: String
 
+    var supportDirectoryURL: URL {
+        URL(fileURLWithPath: workspaceRoot, isDirectory: true)
+            .appendingPathComponent(supportDirectory, isDirectory: true)
+    }
+
+    var uploadLimitStateFileURL: URL {
+        supportDirectoryURL.appendingPathComponent("upload_limit_state.json", isDirectory: false)
+    }
+
     static func `default`() -> NativeAppEnvironment {
         let packageRoot = resolveWorkspaceRoot()
         return NativeAppEnvironment(
@@ -1350,6 +1359,47 @@ struct NativeAppEnvironment: Equatable, Sendable {
             }
             candidate = parent
         }
+    }
+}
+
+private struct UploadLimitStateRecord: Codable {
+    var estimatedResetAt: String
+}
+
+struct UploadLimitStateStore {
+    let environment: NativeAppEnvironment
+
+    func load(now: Date = Date()) -> Date? {
+        let fileURL = environment.uploadLimitStateFileURL
+        guard let data = try? Data(contentsOf: fileURL),
+              let record = try? JSONDecoder().decode(UploadLimitStateRecord.self, from: data),
+              let estimatedResetAt = Self.makeISO8601Formatter().date(from: record.estimatedResetAt) else {
+            return nil
+        }
+        guard estimatedResetAt > now else {
+            clear()
+            return nil
+        }
+        return estimatedResetAt
+    }
+
+    func save(_ date: Date) throws {
+        let fileManager = FileManager.default
+        let directory = environment.supportDirectoryURL
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let record = UploadLimitStateRecord(estimatedResetAt: Self.makeISO8601Formatter().string(from: date))
+        let data = try JSONEncoder().encode(record)
+        try data.write(to: environment.uploadLimitStateFileURL, options: .atomic)
+    }
+
+    func clear() {
+        try? FileManager.default.removeItem(at: environment.uploadLimitStateFileURL)
+    }
+
+    private static func makeISO8601Formatter() -> ISO8601DateFormatter {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
     }
 }
 

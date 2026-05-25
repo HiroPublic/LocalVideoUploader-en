@@ -22,6 +22,11 @@ struct ContentView: View {
                                 labeledValue("Workspace", viewModel.environment.workspaceRoot)
                                 labeledValue("CLI", viewModel.environment.cliRelativePath)
                                 labeledValue("Support Dir", viewModel.environment.supportDirectory)
+                                if let _ = viewModel.uploadLimitResetEstimate {
+                                    Text(viewModel.uploadLimitResetEstimateText)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.red)
+                                }
                                 HStack(spacing: 8) {
                                     Button("Sign Out") {
                                         Task { await viewModel.signOut() }

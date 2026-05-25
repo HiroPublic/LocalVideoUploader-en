@@ -709,6 +709,66 @@ final class BatchUploadManifestBuilderTests: XCTestCase {
     }
 
     @MainActor
+    func testRunBatchUploadPersistsUploadLimitEstimate() async throws {
+        let cliService = MockCLIService()
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let environment = NativeAppEnvironment(
+            workspaceRoot: root.path,
+            cliRelativePath: ".venv/bin/iphoto2youtube",
+            supportDirectory: ".iphoto2youtube"
+        )
+        let viewModel = AppViewModel(
+            environment: environment,
+            cliService: cliService,
+            photoLibraryService: MockPhotoLibraryService()
+        )
+        viewModel.commonMetadata.place = "砧公園"
+        viewModel.commonMetadata.eventName = "花見"
+        viewModel.commonMetadata.playlistsText = "[散歩] 自宅_花見"
+        viewModel.drafts = [
+            VideoDraft(
+                filePath: "/tmp/movie.mov",
+                captureDate: Date(timeIntervalSince1970: 0),
+                content: "花見"
+            )
+        ]
+        cliService.batchUploadResults = [
+            makeFailedBatchUploadResponse(
+                path: "/tmp/movie.mov",
+                title: "failed",
+                reason: "YouTube チャンネルの日次アップロード本数制限に達しました: videos.insert. 24時間後（推定日時: 2026-05-26 10:00 JST 以降）に再試行してください。 詳細: uploadLimitExceeded"
+            )
+        ]
+
+        await viewModel.runBatchUpload(dryRun: false)
+
+        XCTAssertEqual(viewModel.uploadLimitResetEstimateText, "YouTube upload limit reset estimate: 2026-05-26 10:00 GMT+9")
+        XCTAssertNotNil(UploadLimitStateStore(environment: environment).load(now: makeDate(year: 2026, month: 5, day: 25)))
+    }
+
+    @MainActor
+    func testAppViewModelLoadsSavedUploadLimitEstimateOnInit() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let environment = NativeAppEnvironment(
+            workspaceRoot: root.path,
+            cliRelativePath: ".venv/bin/iphoto2youtube",
+            supportDirectory: ".iphoto2youtube"
+        )
+        try UploadLimitStateStore(environment: environment).save(makeDate(year: 2099, month: 5, day: 26, hour: 10, minute: 0))
+
+        let viewModel = AppViewModel(
+            environment: environment,
+            cliService: MockCLIService(),
+            photoLibraryService: MockPhotoLibraryService()
+        )
+
+        XCTAssertNotNil(viewModel.uploadLimitResetEstimate)
+        XCTAssertTrue(viewModel.uploadLimitResetEstimateText.contains("2099-05-26 10:00"))
+    }
+
+    @MainActor
     func testRequestPhotoLibraryAutoWorkflowShowsConfirmation() {
         let viewModel = AppViewModel(cliService: MockCLIService(), photoLibraryService: MockPhotoLibraryService())
         viewModel.commonMetadata.place = "砧公園"
@@ -1223,11 +1283,13 @@ private func createUploadHistoryDB(
     }
 }
 
-private func makeDate(year: Int, month: Int, day: Int) -> Date {
+private func makeDate(year: Int, month: Int, day: Int, hour: Int = 0, minute: Int = 0) -> Date {
     var components = DateComponents()
     components.year = year
     components.month = month
     components.day = day
+    components.hour = hour
+    components.minute = minute
     components.timeZone = TimeZone(identifier: "Asia/Tokyo")
     return Calendar(identifier: .gregorian).date(from: components) ?? Date()
 }
@@ -1249,7 +1311,7 @@ private func makeBatchUploadResponse(path: String, title: String) -> BatchUpload
     )
 }
 
-private func makeFailedBatchUploadResponse(path: String, title: String) -> BatchUploadResponse {
+private func makeFailedBatchUploadResponse(path: String, title: String, reason: String = "upload failed") -> BatchUploadResponse {
     BatchUploadResponse(
         summary: BatchUploadSummary(total: 1, uploadedCount: 0, skippedCount: 0, failedCount: 1),
         results: [
@@ -1259,7 +1321,7 @@ private func makeFailedBatchUploadResponse(path: String, title: String) -> Batch
                 title: title,
                 youtubeVideoID: "",
                 youtubeVideoURL: "",
-                reason: "upload failed"
+                reason: reason
             )
         ],
         csvPath: ".iphoto2youtube/ledger.csv"

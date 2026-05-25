@@ -12,6 +12,7 @@ final class AppViewModel: ObservableObject {
     @Published var logOutput: String
     @Published var isRunning: Bool
     @Published var taskProgress: TaskProgressState?
+    @Published var uploadLimitResetEstimate: Date?
     @Published var lastError: String
     @Published var uploadConfirmation: UploadConfirmationState?
     @Published var photoLibraryAlertState: PhotoLibraryAlertState?
@@ -72,6 +73,7 @@ final class AppViewModel: ObservableObject {
         self.logOutput = ""
         self.isRunning = false
         self.taskProgress = nil
+        self.uploadLimitResetEstimate = UploadLimitStateStore(environment: environment).load()
         self.lastError = ""
         self.uploadConfirmation = nil
         self.photoLibraryAlertState = nil
@@ -499,6 +501,7 @@ final class AppViewModel: ObservableObject {
     func autoRefreshAuthStatusIfNeeded() async {
         guard !hasAttemptedInitialAuthRefresh else { return }
         hasAttemptedInitialAuthRefresh = true
+        refreshUploadLimitResetEstimate()
         // Defer initial publishes until after the first render pass.
         // Publishing during the initial view update can destabilize text-field focus on macOS.
         await Task.yield()
@@ -1135,6 +1138,7 @@ final class AppViewModel: ObservableObject {
                 }
             )
             appendLog(renderBatchUploadLog(result: result, dryRun: dryRun))
+            persistUploadLimitEstimateIfNeeded(from: result.results.map(\.reason))
             if result.summary.failedCount > 0,
                let firstFailure = result.results.first(where: { $0.status == "failed" && !$0.reason.isEmpty }) {
                 lastError = firstFailure.reason
@@ -1385,6 +1389,7 @@ final class AppViewModel: ObservableObject {
             appendLog("Completed: \(label)")
         } catch {
             lastError = error.localizedDescription
+            persistUploadLimitEstimateIfNeeded(from: [error.localizedDescription])
             appendLog("Error: \(error.localizedDescription)")
         }
         taskProgress = nil
@@ -1396,6 +1401,11 @@ final class AppViewModel: ObservableObject {
             logOutput += "\n\n"
         }
         logOutput += message
+    }
+
+    var uploadLimitResetEstimateText: String {
+        guard let uploadLimitResetEstimate else { return "" }
+        return "YouTube upload limit reset estimate: \(Self.uploadLimitNoticeFormatter.string(from: uploadLimitResetEstimate))"
     }
 
     private func applyPhotoLibraryProgress(_ progress: PhotoLibraryLoadProgress) {
@@ -1476,6 +1486,69 @@ final class AppViewModel: ObservableObject {
         }
         return error.localizedDescription
     }
+
+    private func refreshUploadLimitResetEstimate(now: Date = Date()) {
+        uploadLimitResetEstimate = UploadLimitStateStore(environment: environment).load(now: now)
+    }
+
+    private func persistUploadLimitEstimateIfNeeded(from messages: [String], now: Date = Date()) {
+        guard let message = messages.first(where: { Self.isUploadLimitMessage($0) }) else {
+            refreshUploadLimitResetEstimate(now: now)
+            return
+        }
+
+        let estimate = Self.extractUploadLimitEstimate(from: message) ?? Self.fallbackUploadLimitEstimate(now: now)
+        do {
+            try UploadLimitStateStore(environment: environment).save(estimate)
+            uploadLimitResetEstimate = estimate
+        } catch {
+            appendLog("Failed to save upload limit reset estimate: \(error.localizedDescription)")
+        }
+    }
+
+    private static func isUploadLimitMessage(_ message: String) -> Bool {
+        message.contains("日次アップロード本数制限") || message.contains("uploadLimitExceeded")
+    }
+
+    private static func extractUploadLimitEstimate(from message: String) -> Date? {
+        guard let range = message.range(of: #"推定日時:\s*([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} [A-Z]{3,4})"#, options: .regularExpression) else {
+            return nil
+        }
+        let matched = String(message[range])
+        let prefix = "推定日時:"
+        let value = matched.replacingOccurrences(of: prefix, with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return uploadLimitParserFormatter.date(from: value)
+    }
+
+    private static func fallbackUploadLimitEstimate(now: Date) -> Date {
+        let calendar = Calendar(identifier: .gregorian)
+        let retryAt = now.addingTimeInterval(24 * 60 * 60)
+        let components = calendar.dateComponents(in: .autoupdatingCurrent, from: retryAt)
+        guard let minute = components.minute,
+              let second = components.second,
+              let nanosecond = components.nanosecond else {
+            return retryAt
+        }
+        if minute == 0 && second == 0 && nanosecond == 0 {
+            return retryAt
+        }
+        let rounded = calendar.date(bySettingHour: components.hour ?? 0, minute: 0, second: 0, of: retryAt) ?? retryAt
+        return calendar.date(byAdding: .hour, value: 1, to: rounded) ?? retryAt
+    }
+
+    private static let uploadLimitParserFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
+        return formatter
+    }()
+
+    private static let uploadLimitNoticeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm zzz"
+        return formatter
+    }()
 
     private func buildUploadConfirmationMessage() -> String {
         let channelLine: String
