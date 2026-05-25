@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
+from pathlib import Path
 
 from ..exceptions import UploadError, YouTubeApiError
 from ..models import ChannelInfo, ComposedMetadata, UploadResult, VideoMetadataInput
@@ -23,6 +24,18 @@ YOUTUBE_API_QUOTA_COSTS = {
 
 def _quota_logger_kwargs(quota_logger):
     return {"quota_logger": quota_logger} if quota_logger is not None else {}
+
+
+def _format_upload_limit_retry_estimate(now: datetime | None = None) -> str:
+    current = now or datetime.now().astimezone()
+    if current.tzinfo is None:
+        current = current.astimezone()
+
+    retry_at = current + timedelta(hours=24)
+    if retry_at.minute != 0 or retry_at.second != 0 or retry_at.microsecond != 0:
+        retry_at = retry_at.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+
+    return retry_at.strftime("%Y-%m-%d %H:%M %Z")
 
 
 def fetch_authenticated_channel(credentials, quota_logger=None) -> ChannelInfo:
@@ -176,9 +189,10 @@ def _find_playlist_item_id(youtube, playlist_id: str, video_id: str, quota_logge
 
 
 class YouTubeUploadService:
-    def __init__(self, credentials, quota_logger=None) -> None:
+    def __init__(self, credentials, quota_logger=None, progress_callback=None) -> None:
         self.youtube = _build_youtube_client(credentials)
         self.quota_logger = quota_logger
+        self.progress_callback = progress_callback
         self._playlist_cache: dict[str, str] = {}
         self._playlist_cache_populated = False
         self._playlist_api_blocked = False
@@ -205,7 +219,11 @@ class YouTubeUploadService:
             body=body,
             media_body=media,
         )
-        response = self._execute_resumable_request(request, operation="videos.insert")
+        response = self._execute_resumable_request(
+            request,
+            operation="videos.insert",
+            metadata=metadata,
+        )
         video_id = response.get("id")
         if not video_id:
             raise UploadError("YouTube API から動画 ID を取得できませんでした。")
@@ -375,12 +393,25 @@ class YouTubeUploadService:
             "removed_playlists": removed_playlists,
         }
 
-    def _execute_resumable_request(self, request, *, operation: str):
+    def _execute_resumable_request(self, request, *, operation: str, metadata: VideoMetadataInput | None = None):
         response = None
         recorded = False
+        progress_callback = getattr(self, "progress_callback", None)
+        video_path = str(metadata.video_path) if metadata else ""
+        file_name = Path(video_path).name if video_path else ""
         while response is None:
             try:
-                _, response = request.next_chunk()
+                status, response = request.next_chunk()
+                if status is not None and progress_callback is not None:
+                    progress_callback(
+                        {
+                            "event": "youtube_upload_progress",
+                            "operation": operation,
+                            "video_path": video_path,
+                            "file_name": file_name,
+                            "progress": float(status.progress()),
+                        }
+                    )
             except Exception as exc:
                 classified = _classify_youtube_error(exc, operation=operation)
                 if not recorded and classified.status_code is not None:
@@ -389,6 +420,16 @@ class YouTubeUploadService:
                 raise classified from exc
         if not recorded:
             _record_quota_usage(getattr(self, "quota_logger", None), operation)
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "event": "youtube_upload_progress",
+                    "operation": operation,
+                    "video_path": video_path,
+                    "file_name": file_name,
+                    "progress": 1.0,
+                }
+            )
         return response
 
     def _populate_playlist_cache(self) -> None:
@@ -494,9 +535,10 @@ def _classify_youtube_error(exc: Exception, *, operation: str) -> YouTubeApiErro
         elif status_code in {400} and "uploadLimitExceeded" in reason:
             category = "upload_limit"
             suffix = f" 詳細: {detail}" if detail else ""
+            retry_estimate = _format_upload_limit_retry_estimate()
             message = (
                 f"YouTube チャンネルの日次アップロード本数制限に達しました: {operation}. "
-                f"24時間後に再試行してください。{suffix}"
+                f"24時間後（推定日時: {retry_estimate} 以降）に再試行してください。{suffix}"
             )
         elif status_code in {400}:
             category = "invalid_request"

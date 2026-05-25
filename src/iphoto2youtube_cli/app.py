@@ -6,6 +6,7 @@ import inspect
 import json
 from pathlib import Path
 import time
+from typing import Callable
 
 from .config import AppPaths, AppSettings
 from .media_info import format_duration, format_file_size, format_resolution
@@ -154,6 +155,7 @@ class Application:
         dry_run: bool = False,
         ledger_csv_path: Path | None = None,
         allow_duplicate: bool = False,
+        progress_callback: Callable[[dict[str, object]], None] | None = None,
     ) -> UploadAttemptResult:
         self.initialize()
         started_at = datetime.now()
@@ -190,7 +192,7 @@ class Application:
                 )
             else:
                 credentials = self.auth_service.load_credentials()
-                youtube_service = self._build_youtube_service(credentials)
+                youtube_service = self._build_youtube_service(credentials, progress_callback=progress_callback)
                 result = youtube_service.upload_video(metadata, composed)
 
             self.history_repo.save_upload_result(metadata, composed, result)
@@ -317,6 +319,7 @@ class Application:
         dry_run: bool = False,
         ledger_csv_path: Path | None = None,
         allow_duplicate: bool = False,
+        progress_callback: Callable[[dict[str, object]], None] | None = None,
     ) -> CommandResult:
         self.initialize()
         uploaded_count = 0
@@ -324,12 +327,34 @@ class Application:
         failed_count = 0
         results: list[dict[str, object]] = []
         for index, metadata in enumerate(items):
+            current_item = index + 1
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "event": "batch_upload_item",
+                        "current": current_item,
+                        "total": len(items),
+                        "video_path": str(metadata.video_path),
+                        "file_name": metadata.video_path.name,
+                    }
+                )
             try:
                 attempt = self.perform_upload(
                     metadata,
                     dry_run=dry_run,
                     ledger_csv_path=ledger_csv_path,
                     allow_duplicate=allow_duplicate,
+                    progress_callback=(
+                        None
+                        if progress_callback is None
+                        else lambda payload, current=current_item, total=len(items): progress_callback(
+                            {
+                                **payload,
+                                "current": current,
+                                "total": total,
+                            }
+                        )
+                    ),
                 )
                 if attempt.status == "skipped_duplicate":
                     skipped_count += 1
@@ -345,6 +370,16 @@ class Application:
                         "reason": attempt.reason,
                     }
                 )
+                if progress_callback is not None:
+                    progress_callback(
+                        {
+                            "event": "batch_upload_item_completed",
+                            "current": current_item,
+                            "total": len(items),
+                            "video_path": str(metadata.video_path),
+                            "file_name": metadata.video_path.name,
+                        }
+                    )
             except CliError as exc:
                 failed_count += 1
                 results.append(
@@ -357,6 +392,16 @@ class Application:
                         "reason": str(exc),
                     }
                 )
+                if progress_callback is not None:
+                    progress_callback(
+                        {
+                            "event": "batch_upload_item_completed",
+                            "current": current_item,
+                            "total": len(items),
+                            "video_path": str(metadata.video_path),
+                            "file_name": metadata.video_path.name,
+                        }
+                    )
                 if self._should_abort_batch_after_error(exc):
                     remaining = items[index + 1 :]
                     failed_count += len(remaining)
@@ -740,8 +785,12 @@ class Application:
             return "private"
         return upload_status if upload_status in {"private", "unlisted", "public"} else "private"
 
-    def _build_youtube_service(self, credentials):
-        return self._call_with_optional_quota_logger(YouTubeUploadService, credentials)
+    def _build_youtube_service(self, credentials, *, progress_callback=None):
+        return YouTubeUploadService(
+            credentials,
+            quota_logger=self.history_repo,
+            progress_callback=progress_callback,
+        )
 
     def _call_with_optional_quota_logger(self, func, *args):
         signature = inspect.signature(func)

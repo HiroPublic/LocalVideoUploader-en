@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httplib2
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -11,7 +11,12 @@ from googleapiclient.errors import HttpError
 
 from iphoto2youtube_cli.exceptions import YouTubeApiError
 from iphoto2youtube_cli.models import ComposedMetadata, VideoMetadataInput
-from iphoto2youtube_cli.services.youtube import YouTubeUploadService, _classify_youtube_error, fetch_video_verification
+from iphoto2youtube_cli.services.youtube import (
+    YouTubeUploadService,
+    _classify_youtube_error,
+    _format_upload_limit_retry_estimate,
+    fetch_video_verification,
+)
 
 
 class DummyRequest:
@@ -158,9 +163,17 @@ class YouTubeServiceTest(unittest.TestCase):
 
         self.assertEqual(classified.category, "upload_limit")
         self.assertIn("日次アップロード本数制限", str(classified))
-        self.assertIn("24時間後に再試行してください", str(classified))
+        self.assertIn("24時間後（推定日時:", str(classified))
+        self.assertIn("以降）に再試行してください", str(classified))
         self.assertIn("uploadLimitExceeded", str(classified))
         self.assertIn("The user has exceeded the number of videos they may upload.", str(classified))
+
+    def test_format_upload_limit_retry_estimate_rounds_up_with_margin(self) -> None:
+        now = datetime(2026, 5, 23, 9, 28, 2, tzinfo=timezone(timedelta(hours=9), "JST"))
+
+        formatted = _format_upload_limit_retry_estimate(now)
+
+        self.assertEqual(formatted, "2026-05-24 10:00 JST")
 
     def test_sync_video_metadata_updates_video_and_playlists(self) -> None:
         service = YouTubeUploadService.__new__(YouTubeUploadService)

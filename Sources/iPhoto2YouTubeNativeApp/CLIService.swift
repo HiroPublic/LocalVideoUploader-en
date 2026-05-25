@@ -29,6 +29,82 @@ private struct CLILaunchConfiguration {
     let environment: [String: String]
 }
 
+private final class CLIOutputCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private let progressHandler: (@Sendable (CLIProgressEvent) -> Void)?
+    private var stdoutText = ""
+    private var stderrText = ""
+    private var stderrPending = ""
+
+    init(progressHandler: (@Sendable (CLIProgressEvent) -> Void)?) {
+        self.progressHandler = progressHandler
+    }
+
+    func appendStdout(_ data: Data) {
+        guard !data.isEmpty else { return }
+        let text = String(decoding: data, as: UTF8.self)
+        lock.lock()
+        stdoutText += text
+        lock.unlock()
+    }
+
+    func appendStderrChunk(_ data: Data, parser: (String) -> CLIProgressEvent?) {
+        guard !data.isEmpty else { return }
+        let text = String(decoding: data, as: UTF8.self)
+        var parsedEvents: [CLIProgressEvent] = []
+
+        lock.lock()
+        stderrPending += text
+        while let newlineRange = stderrPending.range(of: "\n") {
+            let line = String(stderrPending[..<newlineRange.lowerBound])
+            stderrPending.removeSubrange(..<newlineRange.upperBound)
+            if let event = parser(line) {
+                parsedEvents.append(event)
+            } else if !line.isEmpty {
+                if !stderrText.isEmpty {
+                    stderrText += "\n"
+                }
+                stderrText += line
+            }
+        }
+        lock.unlock()
+
+        for event in parsedEvents {
+            progressHandler?(event)
+        }
+    }
+
+    func flushRemaining(parser: (String) -> CLIProgressEvent?) {
+        var pendingLine = ""
+
+        lock.lock()
+        pendingLine = stderrPending
+        stderrPending = ""
+        lock.unlock()
+
+        guard !pendingLine.isEmpty else { return }
+        if let event = parser(pendingLine) {
+            progressHandler?(event)
+            return
+        }
+
+        lock.lock()
+        if !stderrText.isEmpty {
+            stderrText += "\n"
+        }
+        stderrText += pendingLine
+        lock.unlock()
+    }
+
+    func snapshot() -> (stdout: String, stderr: String) {
+        lock.lock()
+        let stdout = stdoutText
+        let stderr = stderrText
+        lock.unlock()
+        return (stdout, stderr)
+    }
+}
+
 protocol CLIServicing: Sendable {
     func refreshAuthStatus(environment: NativeAppEnvironment) async throws -> ChannelStatus
     func fetchCurrentChannel(environment: NativeAppEnvironment) async throws -> ChannelStatus
@@ -37,7 +113,8 @@ protocol CLIServicing: Sendable {
     func runBatchUpload(
         manifestURL: URL,
         dryRun: Bool,
-        environment: NativeAppEnvironment
+        environment: NativeAppEnvironment,
+        progressHandler: (@Sendable (CLIProgressEvent) -> Void)?
     ) async throws -> BatchUploadResponse
     func verifyUpload(
         youtubeVideoID: String,
@@ -64,6 +141,8 @@ protocol CLIServicing: Sendable {
 }
 
 struct CLIService: CLIServicing {
+    private static let progressEventPrefix = "::progress::"
+
     func refreshAuthStatus(environment: NativeAppEnvironment) async throws -> ChannelStatus {
         let decoded = try await runJSON(arguments: ["auth-status"], environment: environment)
         return channelStatus(from: decoded)
@@ -118,7 +197,8 @@ struct CLIService: CLIServicing {
     func runBatchUpload(
         manifestURL: URL,
         dryRun: Bool,
-        environment: NativeAppEnvironment
+        environment: NativeAppEnvironment,
+        progressHandler: (@Sendable (CLIProgressEvent) -> Void)? = nil
     ) async throws -> BatchUploadResponse {
         var arguments = [
             "batch-upload",
@@ -129,7 +209,7 @@ struct CLIService: CLIServicing {
         if dryRun {
             arguments.append("--dry-run")
         }
-        let decoded = try await runJSON(arguments: arguments, environment: environment)
+        let decoded = try await runJSON(arguments: arguments, environment: environment, progressHandler: progressHandler)
         return BatchUploadResponse.from(jsonObject: decoded)
     }
 
@@ -212,7 +292,11 @@ struct CLIService: CLIServicing {
         )
     }
 
-    private func runBlocking(arguments: [String], environment: NativeAppEnvironment) throws -> CLICommandResult {
+    private func runBlocking(
+        arguments: [String],
+        environment: NativeAppEnvironment,
+        progressHandler: (@Sendable (CLIProgressEvent) -> Void)? = nil
+    ) throws -> CLICommandResult {
         let workspaceRoot = URL(fileURLWithPath: environment.workspaceRoot, isDirectory: true)
         let launchConfig = try resolveLaunchConfiguration(workspaceRoot: workspaceRoot, environment: environment)
 
@@ -227,12 +311,30 @@ struct CLIService: CLIServicing {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
+        let collector = CLIOutputCollector(progressHandler: progressHandler)
+
+        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty else { return }
+            collector.appendStdout(data)
+        }
+        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty else { return }
+            collector.appendStderrChunk(data, parser: parseProgressEvent)
+        }
+
         try process.run()
         process.waitUntilExit()
+        stdoutPipe.fileHandleForReading.readabilityHandler = nil
+        stderrPipe.fileHandleForReading.readabilityHandler = nil
 
-        let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        return CLICommandResult(stdout: stdout, stderr: stderr, exitCode: process.terminationStatus)
+        collector.appendStdout(stdoutPipe.fileHandleForReading.readDataToEndOfFile())
+        collector.appendStderrChunk(stderrPipe.fileHandleForReading.readDataToEndOfFile(), parser: parseProgressEvent)
+        collector.flushRemaining(parser: parseProgressEvent)
+        let output = collector.snapshot()
+
+        return CLICommandResult(stdout: output.stdout, stderr: output.stderr, exitCode: process.terminationStatus)
     }
 
     private func resolveLaunchConfiguration(
@@ -276,14 +378,22 @@ struct CLIService: CLIServicing {
         throw CLIServiceError.executableNotFound(cliURL.path)
     }
 
-    private func run(arguments: [String], environment: NativeAppEnvironment) async throws -> CLICommandResult {
+    private func run(
+        arguments: [String],
+        environment: NativeAppEnvironment,
+        progressHandler: (@Sendable (CLIProgressEvent) -> Void)? = nil
+    ) async throws -> CLICommandResult {
         try await Task.detached(priority: .userInitiated) {
-            try runBlocking(arguments: arguments, environment: environment)
+            try runBlocking(arguments: arguments, environment: environment, progressHandler: progressHandler)
         }.value
     }
 
-    private func runJSON(arguments: [String], environment: NativeAppEnvironment) async throws -> [String: Any] {
-        let result = try await run(arguments: arguments, environment: environment)
+    private func runJSON(
+        arguments: [String],
+        environment: NativeAppEnvironment,
+        progressHandler: (@Sendable (CLIProgressEvent) -> Void)? = nil
+    ) async throws -> [String: Any] {
+        let result = try await run(arguments: arguments, environment: environment, progressHandler: progressHandler)
         guard result.exitCode == 0 else {
             let errorText = result.stderr.isEmpty ? result.stdout : result.stderr
             throw CLIServiceError.commandFailed(parseCommandFailureMessage(errorText))
@@ -308,5 +418,22 @@ struct CLIService: CLIServicing {
             return String(lastLine)
         }
         return trimmed.isEmpty ? "CLI execution failed." : trimmed
+    }
+
+    private func parseProgressEvent(from line: String) -> CLIProgressEvent? {
+        guard line.hasPrefix(Self.progressEventPrefix) else { return nil }
+        let payloadText = String(line.dropFirst(Self.progressEventPrefix.count))
+        guard let data = payloadText.data(using: .utf8),
+              let decoded = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return CLIProgressEvent(
+            event: decoded["event"] as? String ?? "",
+            current: decoded["current"] as? Int,
+            total: decoded["total"] as? Int,
+            videoPath: decoded["video_path"] as? String ?? "",
+            fileName: decoded["file_name"] as? String ?? "",
+            progress: decoded["progress"] as? Double
+        )
     }
 }

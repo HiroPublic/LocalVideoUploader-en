@@ -11,6 +11,8 @@ from .exceptions import CliError, ValidationError, YouTubeApiError
 from .media_info import format_duration, format_file_size, format_resolution
 from .validators import build_video_metadata_input, build_video_metadata_input_from_mapping
 
+PROGRESS_EVENT_PREFIX = "::progress::"
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -460,6 +462,7 @@ def main(argv: list[str] | None = None) -> int:
                 dry_run=args.dry_run,
                 ledger_csv_path=ledger_csv,
                 allow_duplicate=args.allow_duplicate,
+                progress_callback=_emit_progress_event,
             )
         else:
             parser.error(f"未対応コマンドです: {args.command}")
@@ -500,6 +503,14 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(json.dumps({"message": result.message, "payload": result.payload or {}}, ensure_ascii=False, indent=2))
     return 0
+
+
+def _emit_progress_event(payload: dict[str, object]) -> None:
+    print(
+        f"{PROGRESS_EVENT_PREFIX}{json.dumps(payload, ensure_ascii=False)}",
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def _apply_settings_defaults(args: argparse.Namespace, settings: AppSettings) -> None:

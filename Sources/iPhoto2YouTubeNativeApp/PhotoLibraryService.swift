@@ -6,7 +6,10 @@ import Photos
 protocol PhotoLibraryServicing: Sendable {
     func authorizationStatus() -> PhotoLibraryAuthorizationStatus
     func requestAuthorization() async -> PhotoLibraryAuthorizationStatus
-    func fetchVideos(on targetDate: Date) async throws -> PhotoLibraryFetchResult
+    func fetchVideos(
+        on targetDate: Date,
+        progressHandler: (@Sendable (PhotoLibraryLoadProgress) -> Void)?
+    ) async throws -> PhotoLibraryFetchResult
     func deleteVideos(withIDs ids: [String]) async throws
     func photoLibraryCacheStatus() throws -> PhotoLibraryCacheStatus
     func clearPhotoLibraryCache() throws
@@ -100,7 +103,10 @@ struct PhotoLibraryService {
         return Self.mapAuthorizationStatus(status)
     }
 
-    func fetchVideos(on targetDate: Date) async throws -> PhotoLibraryFetchResult {
+    func fetchVideos(
+        on targetDate: Date,
+        progressHandler: (@Sendable (PhotoLibraryLoadProgress) -> Void)? = nil
+    ) async throws -> PhotoLibraryFetchResult {
         let status = authorizationStatus()
         guard status == .granted || status == .limited else {
             throw PhotoLibraryServiceError.accessDenied
@@ -121,28 +127,45 @@ struct PhotoLibraryService {
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
 
         let assets = PHAsset.fetchAssets(with: options)
-        var items: [PhotoLibraryVideoItem] = []
-        var failures: [PhotoLibraryFetchFailure] = []
+        var candidates: [(asset: PHAsset, resources: [PHAssetResource], captureDate: Date, fileName: String)] = []
+        candidates.reserveCapacity(assets.count)
         for index in 0 ..< assets.count {
             let asset = assets.object(at: index)
             let resources = PHAssetResource.assetResources(for: asset)
             guard isVideoLikeAsset(asset, resources: resources) else { continue }
-
             let captureDate = asset.creationDate ?? asset.modificationDate ?? targetDate
+            let fileName = resources.first?.originalFilename ?? asset.localIdentifier.replacingOccurrences(of: "/", with: "_")
+            candidates.append((asset, resources, captureDate, fileName))
+        }
+
+        var items: [PhotoLibraryVideoItem] = []
+        var failures: [PhotoLibraryFetchFailure] = []
+        progressHandler?(PhotoLibraryLoadProgress(processedCount: 0, totalCount: candidates.count, currentFileName: ""))
+        for (index, candidate) in candidates.enumerated() {
             do {
-                if let item = try await buildItem(from: asset, resources: resources, captureDate: captureDate) {
+                if let item = try await buildItem(
+                    from: candidate.asset,
+                    resources: candidate.resources,
+                    captureDate: candidate.captureDate
+                ) {
                     items.append(item)
                 }
             } catch {
-                let fileName = resources.first?.originalFilename ?? asset.localIdentifier.replacingOccurrences(of: "/", with: "_")
                 failures.append(
                     PhotoLibraryFetchFailure(
-                        assetIdentifier: asset.localIdentifier,
-                        fileName: fileName,
+                        assetIdentifier: candidate.asset.localIdentifier,
+                        fileName: candidate.fileName,
                         message: describeFetchError(error)
                     )
                 )
             }
+            progressHandler?(
+                PhotoLibraryLoadProgress(
+                    processedCount: index + 1,
+                    totalCount: candidates.count,
+                    currentFileName: candidate.fileName
+                )
+            )
         }
         return PhotoLibraryFetchResult(items: items, failures: failures)
     }

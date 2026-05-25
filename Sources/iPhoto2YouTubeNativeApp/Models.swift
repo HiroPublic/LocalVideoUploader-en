@@ -186,6 +186,32 @@ struct BatchUploadResponse: Equatable {
     var csvPath: String
 }
 
+struct TaskProgressState: Equatable {
+    var title: String
+    var detail: String
+    var fractionCompleted: Double?
+
+    var percentText: String {
+        guard let fractionCompleted else { return "" }
+        return String(format: "%.0f%%", max(0, min(fractionCompleted, 1)) * 100)
+    }
+}
+
+struct CLIProgressEvent: Equatable {
+    var event: String
+    var current: Int?
+    var total: Int?
+    var videoPath: String
+    var fileName: String
+    var progress: Double?
+}
+
+struct PhotoLibraryLoadProgress: Equatable {
+    var processedCount: Int
+    var totalCount: Int
+    var currentFileName: String
+}
+
 struct UploadedVideoMetadataSnapshot: Equatable {
     var captureDate: Date
     var content: String

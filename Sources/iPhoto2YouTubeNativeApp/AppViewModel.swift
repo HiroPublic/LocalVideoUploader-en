@@ -11,6 +11,7 @@ final class AppViewModel: ObservableObject {
     @Published var authChannelDetailsMessage: String
     @Published var logOutput: String
     @Published var isRunning: Bool
+    @Published var taskProgress: TaskProgressState?
     @Published var lastError: String
     @Published var uploadConfirmation: UploadConfirmationState?
     @Published var photoLibraryAlertState: PhotoLibraryAlertState?
@@ -70,6 +71,7 @@ final class AppViewModel: ObservableObject {
         self.photoLibraryService = photoLibraryService
         self.logOutput = ""
         self.isRunning = false
+        self.taskProgress = nil
         self.lastError = ""
         self.uploadConfirmation = nil
         self.photoLibraryAlertState = nil
@@ -532,10 +534,22 @@ final class AppViewModel: ObservableObject {
         defer { isPhotoLibraryBusy = false }
         isRunning = true
         lastError = ""
+        taskProgress = TaskProgressState(
+            title: "Loading Videos from Photos",
+            detail: "Preparing items...",
+            fractionCompleted: nil
+        )
         photoLibraryFetchFailureCount = 0
         appendLog("Started: photo-library")
         do {
-            let result = try await photoLibraryService.fetchVideos(on: selectedPhotoLibraryDate)
+            let result = try await photoLibraryService.fetchVideos(
+                on: selectedPhotoLibraryDate,
+                progressHandler: { [weak self] progress in
+                    Task { @MainActor in
+                        self?.applyPhotoLibraryProgress(progress)
+                    }
+                }
+            )
             applyPhotoLibraryFetchResult(result)
             let dateText = Self.selectedDateFormatter.string(from: selectedPhotoLibraryDate)
             appendLog("Photo library load result: \(dateText) / \(photoLibraryVideos.count) item(s)")
@@ -556,6 +570,7 @@ final class AppViewModel: ObservableObject {
             lastError = message
             appendLog("Error: \(message)")
         }
+        taskProgress = nil
         isRunning = false
     }
 
@@ -578,7 +593,7 @@ final class AppViewModel: ObservableObject {
 
         await runTask(label: "delete-photo-library-videos") {
             try await photoLibraryService.deleteVideos(withIDs: targetIDs)
-            let result = try await photoLibraryService.fetchVideos(on: selectedPhotoLibraryDate)
+            let result = try await photoLibraryService.fetchVideos(on: selectedPhotoLibraryDate, progressHandler: nil)
             applyPhotoLibraryFetchResult(result)
 
             let removedNames = targets.map(\.fileName).sorted()
@@ -1098,6 +1113,11 @@ final class AppViewModel: ObservableObject {
             uniqueKeysWithValues: drafts.map { ($0.filePath, UploadedVideoMetadataSnapshot(draft: $0)) }
         )
         await runTask(label: dryRun ? "batch-upload --dry-run" : "batch-upload") {
+            taskProgress = TaskProgressState(
+                title: dryRun ? "Preparing Dry Run" : "Preparing Upload",
+                detail: "Starting batch upload...",
+                fractionCompleted: 0
+            )
             let data = try BatchUploadManifestBuilder.encodedManifestData(drafts: drafts, common: commonMetadata)
             let tempURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("iphoto2youtube-native-\(UUID().uuidString).json")
@@ -1107,7 +1127,12 @@ final class AppViewModel: ObservableObject {
             let result = try await cliService.runBatchUpload(
                 manifestURL: tempURL,
                 dryRun: dryRun,
-                environment: environment
+                environment: environment,
+                progressHandler: { [weak self] event in
+                    Task { @MainActor in
+                        self?.applyCLIProgressEvent(event, dryRun: dryRun)
+                    }
+                }
             )
             appendLog(renderBatchUploadLog(result: result, dryRun: dryRun))
             if result.summary.failedCount > 0,
@@ -1353,6 +1378,7 @@ final class AppViewModel: ObservableObject {
     private func runTask(label: String, operation: () async throws -> Void) async {
         isRunning = true
         lastError = ""
+        taskProgress = nil
         appendLog("Started: \(label)")
         do {
             try await operation()
@@ -1361,6 +1387,7 @@ final class AppViewModel: ObservableObject {
             lastError = error.localizedDescription
             appendLog("Error: \(error.localizedDescription)")
         }
+        taskProgress = nil
         isRunning = false
     }
 
@@ -1369,6 +1396,61 @@ final class AppViewModel: ObservableObject {
             logOutput += "\n\n"
         }
         logOutput += message
+    }
+
+    private func applyPhotoLibraryProgress(_ progress: PhotoLibraryLoadProgress) {
+        let detail: String
+        if progress.totalCount == 0 {
+            detail = "No matching videos found."
+        } else if progress.processedCount == 0 {
+            detail = "0 / \(progress.totalCount) videos"
+        } else {
+            let name = progress.currentFileName.isEmpty ? "" : " - \(progress.currentFileName)"
+            detail = "\(progress.processedCount) / \(progress.totalCount) videos\(name)"
+        }
+        let fraction = progress.totalCount > 0 ? Double(progress.processedCount) / Double(progress.totalCount) : nil
+        taskProgress = TaskProgressState(
+            title: "Loading Videos from Photos",
+            detail: detail,
+            fractionCompleted: fraction
+        )
+    }
+
+    private func applyCLIProgressEvent(_ event: CLIProgressEvent, dryRun: Bool) {
+        switch event.event {
+        case "batch_upload_item":
+            let total = max(event.total ?? 0, 1)
+            let current = min(event.current ?? 0, total)
+            let prefix = dryRun ? "Dry Run" : "Uploading"
+            taskProgress = TaskProgressState(
+                title: "\(prefix) Videos",
+                detail: "\(current) / \(total) videos - \(event.fileName)",
+                fractionCompleted: Double(current - 1) / Double(total)
+            )
+        case "batch_upload_item_completed":
+            let total = max(event.total ?? 0, 1)
+            let current = min(event.current ?? 0, total)
+            let prefix = dryRun ? "Dry Run" : "Uploading"
+            taskProgress = TaskProgressState(
+                title: "\(prefix) Videos",
+                detail: "\(current) / \(total) videos completed",
+                fractionCompleted: Double(current) / Double(total)
+            )
+        case "youtube_upload_progress":
+            let itemProgress = max(0, min(event.progress ?? 0, 1))
+            let total = max(event.total ?? 1, 1)
+            let current = max(event.current ?? 1, 1)
+            let overall = ((Double(current - 1) + itemProgress) / Double(total))
+            let prefix = dryRun ? "Dry Run" : "Uploading"
+            let percent = String(format: "%.0f%%", itemProgress * 100)
+            taskProgress = TaskProgressState(
+                title: "\(prefix) Videos",
+                detail: "\(current) / \(total) videos - \(event.fileName) (\(percent))",
+                fractionCompleted: overall
+            )
+        default:
+            break
+        }
     }
 
     private func applyPhotoLibraryFetchResult(_ result: PhotoLibraryFetchResult) {

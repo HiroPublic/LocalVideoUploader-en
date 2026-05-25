@@ -1285,7 +1285,10 @@ private final class MockPhotoLibraryService: PhotoLibraryServicing, @unchecked S
         requestAuthorizationResult
     }
 
-    func fetchVideos(on targetDate: Date) async throws -> PhotoLibraryFetchResult {
+    func fetchVideos(
+        on targetDate: Date,
+        progressHandler: (@Sendable (PhotoLibraryLoadProgress) -> Void)?
+    ) async throws -> PhotoLibraryFetchResult {
         fetchVideosCallCount += 1
         if !fetchedVideosResponses.isEmpty {
             return PhotoLibraryFetchResult(items: fetchedVideosResponses.removeFirst(), failures: fetchedVideoFailures)
@@ -1341,7 +1344,8 @@ private final class MockCLIService: CLIServicing, @unchecked Sendable {
     func runBatchUpload(
         manifestURL: URL,
         dryRun: Bool,
-        environment: NativeAppEnvironment
+        environment: NativeAppEnvironment,
+        progressHandler: (@Sendable (CLIProgressEvent) -> Void)?
     ) async throws -> BatchUploadResponse {
         batchUploadCallCount += 1
         if !batchUploadResults.isEmpty {

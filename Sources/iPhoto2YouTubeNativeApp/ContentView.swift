@@ -227,13 +227,17 @@ struct ContentView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 12) {
-                ProgressView()
-                    .controlSize(.large)
-                Text("Processing...")
-                    .font(.headline)
-                Text("Please wait until the current task finishes.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                if let progress = viewModel.taskProgress {
+                    progressPanel(progress, large: true)
+                } else {
+                    ProgressView()
+                        .controlSize(.large)
+                    Text("Processing...")
+                        .font(.headline)
+                    Text("Please wait until the current task finishes.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding(.horizontal, 28)
             .padding(.vertical, 22)
@@ -404,6 +408,9 @@ struct ContentView: View {
                 Text("Cache: \(viewModel.photoLibraryCacheStatus.summaryText)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            if viewModel.isPhotoLibraryBusy, let progress = viewModel.taskProgress {
+                progressPanel(progress)
             }
             if viewModel.photoLibraryFetchFailureCount > 0 {
                 Text("\(viewModel.photoLibraryFetchFailureCount)件の動画取得失敗")
@@ -919,7 +926,8 @@ struct ContentView: View {
     }
 
     private var actionBar: some View {
-        HStack {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
             Button("Dry Run") {
                 Task { await viewModel.runBatchUpload(dryRun: true) }
             }
@@ -949,6 +957,39 @@ struct ContentView: View {
             }
             Spacer()
         }
+            if viewModel.isRunning, let progress = viewModel.taskProgress {
+                progressPanel(progress)
+            }
+        }
+    }
+
+    private func progressPanel(_ progress: TaskProgressState, large: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(progress.title)
+                .font(large ? .headline : .subheadline.weight(.semibold))
+            if let fraction = progress.fractionCompleted {
+                ProgressView(value: fraction, total: 1)
+                    .controlSize(large ? .large : .regular)
+                HStack {
+                    Text(progress.detail)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if !progress.percentText.isEmpty {
+                        Text(progress.percentText)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } else {
+                ProgressView()
+                    .controlSize(large ? .large : .regular)
+                Text(progress.detail)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var historyDeletionConfirmationMessage: String {
