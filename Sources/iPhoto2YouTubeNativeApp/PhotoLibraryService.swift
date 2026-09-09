@@ -132,9 +132,13 @@ struct PhotoLibraryService {
         for index in 0 ..< assets.count {
             let asset = assets.object(at: index)
             let resources = PHAssetResource.assetResources(for: asset)
-            guard isVideoLikeAsset(asset, resources: resources) else { continue }
+            // A Live Photo is an image asset that happens to have a short
+            // `.pairedVideo` resource.  It must not be treated as an uploadable
+            // video: doing so writes that movie with the image's JPG filename.
+            guard Self.isVideoMediaType(asset.mediaType) else { continue }
             let captureDate = asset.creationDate ?? asset.modificationDate ?? targetDate
-            let fileName = resources.first?.originalFilename ?? asset.localIdentifier.replacingOccurrences(of: "/", with: "_")
+            let fileName = preferredVideoResource(from: resources)?.originalFilename
+                ?? asset.localIdentifier.replacingOccurrences(of: "/", with: "_")
             candidates.append((asset, resources, captureDate, fileName))
         }
 
@@ -230,7 +234,8 @@ struct PhotoLibraryService {
         resources: [PHAssetResource],
         captureDate: Date
     ) async throws -> PhotoLibraryVideoItem? {
-        let fileName = resources.first?.originalFilename ?? asset.localIdentifier.replacingOccurrences(of: "/", with: "_")
+        let fileName = preferredVideoResource(from: resources)?.originalFilename
+            ?? asset.localIdentifier.replacingOccurrences(of: "/", with: "_")
         guard let fileURL = try await exportVideoToCache(for: asset, resources: resources, suggestedFileName: fileName) else {
             return nil
         }
@@ -287,11 +292,8 @@ struct PhotoLibraryService {
         return exportURL
     }
 
-    private func isVideoLikeAsset(_ asset: PHAsset, resources: [PHAssetResource]) -> Bool {
-        if asset.mediaType == .video {
-            return true
-        }
-        return preferredVideoResource(from: resources) != nil
+    static func isVideoMediaType(_ mediaType: PHAssetMediaType) -> Bool {
+        mediaType == .video
     }
 
     private func preferredVideoResource(from resources: [PHAssetResource]) -> PHAssetResource? {

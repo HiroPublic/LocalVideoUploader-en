@@ -5,6 +5,13 @@ import SQLite3
 private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 final class BatchUploadManifestBuilderTests: XCTestCase {
+    func testPhotoLibraryVideoFilterExcludesImageAssetsIncludingLivePhotos() {
+        XCTAssertTrue(PhotoLibraryService.isVideoMediaType(.video))
+        XCTAssertFalse(PhotoLibraryService.isVideoMediaType(.image))
+        XCTAssertFalse(PhotoLibraryService.isVideoMediaType(.audio))
+        XCTAssertFalse(PhotoLibraryService.isVideoMediaType(.unknown))
+    }
+
     @MainActor
     func testEncodedManifestContainsDefaultsAndVideos() throws {
         let draft = VideoDraft(

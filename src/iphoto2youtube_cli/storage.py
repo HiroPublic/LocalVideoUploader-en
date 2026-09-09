@@ -96,6 +96,14 @@ CREATE TABLE IF NOT EXISTS metadata_dictionary (
   last_used_at TEXT,
   UNIQUE(kind, normalized_value)
 );
+
+CREATE TABLE IF NOT EXISTS playlist_rollover_route (
+  channel_id TEXT NOT NULL,
+  source_playlist_title TEXT NOT NULL,
+  active_playlist_title TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (channel_id, source_playlist_title)
+);
 """
 
 LEDGER_COLUMNS = [
@@ -671,6 +679,51 @@ class UploadHistoryRepository:
                 """
             ).fetchall()
         return [dict(row) for row in rows]
+
+
+class PlaylistRolloverRouteRepository:
+    """Persists the active overflow playlist for a channel and source title."""
+
+    def __init__(self, db_path: Path) -> None:
+        self.db_path = db_path
+
+    def initialize(self) -> None:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self.db_path) as conn:
+            conn.executescript(MANAGEMENT_SCHEMA)
+
+    def active_playlist(self, *, channel_id: str, source_playlist_title: str) -> str | None:
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT active_playlist_title
+                FROM playlist_rollover_route
+                WHERE channel_id = ? AND source_playlist_title = ?
+                """,
+                (channel_id, source_playlist_title),
+            ).fetchone()
+        return str(row[0]) if row and row[0] else None
+
+    def set_active_playlist(
+        self,
+        *,
+        channel_id: str,
+        source_playlist_title: str,
+        active_playlist_title: str,
+    ) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO playlist_rollover_route (
+                  channel_id, source_playlist_title, active_playlist_title, updated_at
+                ) VALUES (?, ?, ?, ?)
+                ON CONFLICT(channel_id, source_playlist_title) DO UPDATE SET
+                  active_playlist_title = excluded.active_playlist_title,
+                  updated_at = excluded.updated_at
+                """,
+                (channel_id, source_playlist_title, active_playlist_title, datetime.now().isoformat()),
+            )
+            conn.commit()
 
 
 class VideoManagementRepository:

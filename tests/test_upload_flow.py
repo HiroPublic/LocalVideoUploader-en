@@ -146,7 +146,7 @@ class UploadFlowTest(unittest.TestCase):
                 playlists=["[散歩] 自宅_花見"],
             )
             composed = compose_metadata(metadata)
-            uploaded_at = datetime(2026, 4, 8, 11, 12, 43)
+            uploaded_at = datetime.now()
             result = UploadResult(
                 success=True,
                 youtube_video_id="abc123",
@@ -230,7 +230,7 @@ class UploadFlowTest(unittest.TestCase):
                 success=True,
                 youtube_video_id="abc123",
                 youtube_video_url="https://www.youtube.com/watch?v=abc123",
-                uploaded_at=datetime(2026, 4, 8, 11, 12, 43),
+                uploaded_at=datetime.now(),
                 privacy_status="private",
                 upload_status="success",
             )
@@ -273,7 +273,7 @@ class UploadFlowTest(unittest.TestCase):
                 success=True,
                 youtube_video_id="old123",
                 youtube_video_url="https://www.youtube.com/watch?v=old123",
-                uploaded_at=datetime(2026, 4, 8, 11, 12, 43),
+                uploaded_at=datetime.now(),
                 privacy_status="private",
                 upload_status="success",
             )
@@ -363,7 +363,7 @@ class UploadFlowTest(unittest.TestCase):
                 success=True,
                 youtube_video_id="missing123",
                 youtube_video_url="https://www.youtube.com/watch?v=missing123",
-                uploaded_at=datetime(2026, 4, 8, 11, 12, 43),
+                uploaded_at=datetime.now(),
                 privacy_status="private",
                 upload_status="success",
             )
@@ -432,7 +432,7 @@ class UploadFlowTest(unittest.TestCase):
                 success=True,
                 youtube_video_id="video123",
                 youtube_video_url="https://www.youtube.com/watch?v=video123",
-                uploaded_at=datetime(2026, 4, 8, 11, 12, 43),
+                uploaded_at=datetime.now(),
                 privacy_status="private",
                 upload_status="success",
             )
@@ -514,7 +514,7 @@ class UploadFlowTest(unittest.TestCase):
                 success=True,
                 youtube_video_id="video456",
                 youtube_video_url="https://www.youtube.com/watch?v=video456",
-                uploaded_at=datetime(2026, 4, 8, 11, 12, 43),
+                uploaded_at=datetime.now(),
                 privacy_status="private",
                 upload_status="success",
             )
@@ -577,7 +577,7 @@ class UploadFlowTest(unittest.TestCase):
             first_path.write_bytes(b"a")
             second_path = support_dir / "beach.mov"
             second_path.write_bytes(b"b")
-            uploaded_at = datetime(2026, 4, 8, 11, 12, 43)
+            uploaded_at = datetime.now()
 
             first = VideoMetadataInput(
                 video_path=first_path,
@@ -638,7 +638,7 @@ class UploadFlowTest(unittest.TestCase):
             first_path.write_bytes(b"a")
             second_path = support_dir / "beach.mov"
             second_path.write_bytes(b"b")
-            uploaded_at = datetime(2026, 4, 8, 11, 12, 43)
+            uploaded_at = datetime.now()
 
             first = VideoMetadataInput(
                 video_path=first_path,

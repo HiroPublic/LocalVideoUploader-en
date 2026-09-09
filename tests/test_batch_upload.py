@@ -11,9 +11,28 @@ from iphoto2youtube_cli.cli import _load_batch_manifest
 from iphoto2youtube_cli.config import AppPaths, AppSettings
 from iphoto2youtube_cli.exceptions import YouTubeApiError
 from iphoto2youtube_cli.models import UploadAttemptResult, UploadSummary
+from iphoto2youtube_cli.storage import PlaylistRolloverRouteRepository
 
 
 class BatchUploadTest(unittest.TestCase):
+    def test_playlist_rollover_route_is_scoped_to_channel_and_persistent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repository = PlaylistRolloverRouteRepository(Path(tmpdir) / "management.db")
+            repository.initialize()
+            repository.set_active_playlist(
+                channel_id="channel-a",
+                source_playlist_title="Insta360",
+                active_playlist_title="Insta360-1",
+            )
+
+            self.assertEqual(
+                repository.active_playlist(channel_id="channel-a", source_playlist_title="Insta360"),
+                "Insta360-1",
+            )
+            self.assertIsNone(
+                repository.active_playlist(channel_id="channel-b", source_playlist_title="Insta360")
+            )
+
     def test_load_batch_manifest_merges_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

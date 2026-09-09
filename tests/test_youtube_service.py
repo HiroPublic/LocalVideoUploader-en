@@ -126,6 +126,26 @@ class YouTubeServiceTest(unittest.TestCase):
         self.assertIsNone(service.youtube.playlist_resource.insert_body)
         self.assertEqual(service.youtube.playlist_resource.list_responses, [])
 
+    def test_ensure_playlist_searches_all_playlist_pages(self) -> None:
+        service = YouTubeUploadService.__new__(YouTubeUploadService)
+        service.youtube = DummyYoutube()
+        service._playlist_cache = {}
+        service._playlist_cache_populated = False
+        service._playlist_api_blocked = False
+        service.youtube.playlist_resource.list_responses = [
+            {
+                "items": [{"id": "playlist-old", "snippet": {"title": "Older Playlist"}}],
+                "nextPageToken": "next-page",
+            },
+            {"items": [{"id": "playlist-overflow", "snippet": {"title": "Insta360-1"}}]},
+        ]
+
+        playlist_id = service.ensure_playlist("Insta360-1", "private")
+
+        self.assertEqual(playlist_id, "playlist-overflow")
+        self.assertIsNone(service.youtube.playlist_resource.insert_body)
+        self.assertEqual(service.youtube.playlist_resource.list_responses, [])
+
     def test_classify_youtube_error_marks_quota(self) -> None:
         response = httplib2.Response({"status": "403"})
         error = HttpError(
@@ -167,6 +187,109 @@ class YouTubeServiceTest(unittest.TestCase):
         self.assertIn("以降）に再試行してください", str(classified))
         self.assertIn("uploadLimitExceeded", str(classified))
         self.assertIn("The user has exceeded the number of videos they may upload.", str(classified))
+
+    def test_classify_youtube_error_marks_playlist_full(self) -> None:
+        response = httplib2.Response({"status": "403"})
+        error = HttpError(
+            response,
+            b'{"error":{"errors":[{"reason":"playlistContainsMaximumNumberOfVideos"}],"code":403,"message":"Playlist contains maximum number of items."}}',
+        )
+
+        classified = _classify_youtube_error(error, operation="playlistItems.insert")
+
+        self.assertEqual(classified.category, "playlist_full")
+        self.assertIn("プレイリストの動画数上限", str(classified))
+
+    def test_upload_video_rolls_over_insta360_and_hoverx1_playlists(self) -> None:
+        for source_playlist_name in ("Insta360", "HoverX1"):
+            with self.subTest(source_playlist_name=source_playlist_name):
+                service = YouTubeUploadService.__new__(YouTubeUploadService)
+                service.youtube = DummyYoutube()
+                service._playlist_cache = {}
+                service._playlist_cache_populated = False
+                service._playlist_api_blocked = False
+                service._playlist_route_resolver = lambda _: None
+                recorded_routes: list[tuple[str, str]] = []
+                service._playlist_route_recorder = lambda source, active: recorded_routes.append((source, active))
+
+                metadata = VideoMetadataInput(
+                    video_path=Path("/tmp/sample.mov"),
+                    capture_datetime=datetime(2026, 4, 12, 7, 0, 0),
+                    file_size_bytes=123,
+                    playlists=[source_playlist_name],
+                )
+                composed = ComposedMetadata(
+                    title="sample",
+                    description="desc",
+                    tags=["#tag"],
+                    playlists=[source_playlist_name],
+                    title_base="sample",
+                    title_sequence=0,
+                )
+
+                class DummyInsertRequest:
+                    def next_chunk(self):
+                        return None, {"id": "video123"}
+
+                def fake_ensure_playlist(name: str, _: str) -> str:
+                    return f"{name}-id"
+
+                attached_playlist_ids: list[str] = []
+
+                def fake_attach(_: str, playlist_id: str) -> None:
+                    attached_playlist_ids.append(playlist_id)
+                    if playlist_id == f"{source_playlist_name}-id":
+                        raise YouTubeApiError(
+                            "playlist full",
+                            operation="playlistItems.insert",
+                            category="playlist_full",
+                            retryable=False,
+                            status_code=403,
+                            reason="playlistContainsMaximumNumberOfVideos",
+                        )
+
+                with patch("googleapiclient.http.MediaFileUpload"):
+                    with patch.object(service.youtube.videos_resource, "insert", return_value=DummyInsertRequest(), create=True):
+                        with patch.object(service, "ensure_playlist", side_effect=fake_ensure_playlist):
+                            with patch.object(service, "attach_video_to_playlist", side_effect=fake_attach):
+                                result = service.upload_video(metadata, composed)
+
+                rollover_playlist_name = f"{source_playlist_name}-1"
+                self.assertTrue(result.success)
+                self.assertEqual(composed.playlists, [rollover_playlist_name])
+                self.assertEqual(result.playlist_ids, {rollover_playlist_name: f"{rollover_playlist_name}-id"})
+                self.assertEqual(recorded_routes, [(source_playlist_name, rollover_playlist_name)])
+                self.assertEqual(attached_playlist_ids, [f"{source_playlist_name}-id", f"{rollover_playlist_name}-id"])
+
+    def test_upload_video_uses_persisted_rollover_route(self) -> None:
+        service = YouTubeUploadService.__new__(YouTubeUploadService)
+        service.youtube = DummyYoutube()
+        service._playlist_cache = {}
+        service._playlist_cache_populated = False
+        service._playlist_api_blocked = False
+        service._playlist_route_resolver = lambda source: "Insta360-1" if source == "Insta360" else None
+        service._playlist_route_recorder = None
+        metadata = VideoMetadataInput(
+            video_path=Path("/tmp/sample.mov"),
+            capture_datetime=datetime(2026, 4, 12, 7, 0, 0),
+            file_size_bytes=123,
+            playlists=["Insta360"],
+        )
+        composed = ComposedMetadata("sample", "desc", ["#tag"], ["Insta360"], "sample", 0)
+
+        class DummyInsertRequest:
+            def next_chunk(self):
+                return None, {"id": "video123"}
+
+        with patch("googleapiclient.http.MediaFileUpload"):
+            with patch.object(service.youtube.videos_resource, "insert", return_value=DummyInsertRequest(), create=True):
+                with patch.object(service, "ensure_playlist", return_value="insta360-1-id") as ensure_mock:
+                    with patch.object(service, "attach_video_to_playlist") as attach_mock:
+                        service.upload_video(metadata, composed)
+
+        ensure_mock.assert_called_once_with("Insta360-1", "private")
+        attach_mock.assert_called_once_with("video123", "insta360-1-id")
+        self.assertEqual(composed.playlists, ["Insta360-1"])
 
     def test_format_upload_limit_retry_estimate_rounds_up_with_margin(self) -> None:
         now = datetime(2026, 5, 23, 9, 28, 2, tzinfo=timezone(timedelta(hours=9), "JST"))

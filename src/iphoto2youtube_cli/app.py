@@ -15,7 +15,12 @@ from .exceptions import AuthError, CliError, ValidationError, YouTubeApiError
 from .models import ChannelInfo, UploadAttemptResult, UploadResult, UploadSummary, VideoMetadataInput
 from .services.auth import GoogleOAuthService
 from .services.youtube import YouTubeUploadService, fetch_authenticated_channel, fetch_video_verification
-from .storage import LedgerExportService, UploadHistoryRepository, VideoManagementRepository
+from .storage import (
+    LedgerExportService,
+    PlaylistRolloverRouteRepository,
+    UploadHistoryRepository,
+    VideoManagementRepository,
+)
 
 
 @dataclass(slots=True)
@@ -31,12 +36,14 @@ class Application:
         self.auth_service = GoogleOAuthService(paths.credentials_file, paths.token_file)
         self.history_repo = UploadHistoryRepository(paths.history_db)
         self.management_repo = VideoManagementRepository(paths.management_db)
+        self.playlist_routes = PlaylistRolloverRouteRepository(paths.management_db)
         self.ledger_service = LedgerExportService()
 
     def initialize(self) -> None:
         self.paths.support_dir.mkdir(parents=True, exist_ok=True)
         self.history_repo.initialize()
         self.management_repo.initialize()
+        self.playlist_routes.initialize()
         cleanup = self.history_repo.purge_expired_api_data()
         management_deleted = self.management_repo.purge_expired_api_data()
         if cleanup["history_deleted"] > 0 or management_deleted > 0:
@@ -192,7 +199,11 @@ class Application:
                 )
             else:
                 credentials = self.auth_service.load_credentials()
-                youtube_service = self._build_youtube_service(credentials, progress_callback=progress_callback)
+                youtube_service = self._build_youtube_service(
+                    credentials,
+                    progress_callback=progress_callback,
+                    enable_playlist_rollover=True,
+                )
                 result = youtube_service.upload_video(metadata, composed)
 
             self.history_repo.save_upload_result(metadata, composed, result)
@@ -320,13 +331,18 @@ class Application:
         ledger_csv_path: Path | None = None,
         allow_duplicate: bool = False,
         progress_callback: Callable[[dict[str, object]], None] | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> CommandResult:
         self.initialize()
         uploaded_count = 0
         skipped_count = 0
         failed_count = 0
         results: list[dict[str, object]] = []
+        stopped = False
         for index, metadata in enumerate(items):
+            if should_stop is not None and should_stop():
+                stopped = True
+                break
             current_item = index + 1
             if progress_callback is not None:
                 progress_callback(
@@ -426,6 +442,7 @@ class Application:
                     "uploaded_count": uploaded_count,
                     "skipped_count": skipped_count,
                     "failed_count": failed_count,
+                    "stopped": stopped,
                 },
                 "results": results,
                 "csv_path": str(ledger_csv_path or self.paths.ledger_csv),
@@ -785,12 +802,43 @@ class Application:
             return "private"
         return upload_status if upload_status in {"private", "unlisted", "public"} else "private"
 
-    def _build_youtube_service(self, credentials, *, progress_callback=None):
-        return YouTubeUploadService(
-            credentials,
-            quota_logger=self.history_repo,
-            progress_callback=progress_callback,
-        )
+    def _build_youtube_service(self, credentials, *, progress_callback=None, enable_playlist_rollover: bool = False):
+        service_options = {
+            "quota_logger": self.history_repo,
+            "progress_callback": progress_callback,
+        }
+        service_parameters = inspect.signature(YouTubeUploadService).parameters
+        service_options = {
+            name: value for name, value in service_options.items() if name in service_parameters
+        }
+        if not enable_playlist_rollover:
+            return YouTubeUploadService(credentials, **service_options)
+
+        channel = self._call_with_optional_quota_logger(fetch_authenticated_channel, credentials)
+        rollover_sources = {"Insta360", "HoverX1"}
+
+        def resolve_playlist_route(source_playlist_title: str) -> str | None:
+            if source_playlist_title not in rollover_sources:
+                return None
+            return self.playlist_routes.active_playlist(
+                channel_id=channel.channel_id,
+                source_playlist_title=source_playlist_title,
+            )
+
+        def record_playlist_route(source_playlist_title: str, active_playlist_title: str) -> None:
+            if source_playlist_title not in rollover_sources:
+                return
+            self.playlist_routes.set_active_playlist(
+                channel_id=channel.channel_id,
+                source_playlist_title=source_playlist_title,
+                active_playlist_title=active_playlist_title,
+            )
+
+        if "playlist_route_resolver" in service_parameters:
+            service_options["playlist_route_resolver"] = resolve_playlist_route
+        if "playlist_route_recorder" in service_parameters:
+            service_options["playlist_route_recorder"] = record_playlist_route
+        return YouTubeUploadService(credentials, **service_options)
 
     def _call_with_optional_quota_logger(self, func, *args):
         signature = inspect.signature(func)

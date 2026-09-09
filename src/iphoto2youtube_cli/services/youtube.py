@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import json
 from pathlib import Path
+from typing import Callable
 
 from ..exceptions import UploadError, YouTubeApiError
 from ..models import ChannelInfo, ComposedMetadata, UploadResult, VideoMetadataInput
@@ -189,13 +190,22 @@ def _find_playlist_item_id(youtube, playlist_id: str, video_id: str, quota_logge
 
 
 class YouTubeUploadService:
-    def __init__(self, credentials, quota_logger=None, progress_callback=None) -> None:
+    def __init__(
+        self,
+        credentials,
+        quota_logger=None,
+        progress_callback=None,
+        playlist_route_resolver: Callable[[str], str | None] | None = None,
+        playlist_route_recorder: Callable[[str, str], None] | None = None,
+    ) -> None:
         self.youtube = _build_youtube_client(credentials)
         self.quota_logger = quota_logger
         self.progress_callback = progress_callback
         self._playlist_cache: dict[str, str] = {}
         self._playlist_cache_populated = False
         self._playlist_api_blocked = False
+        self._playlist_route_resolver = playlist_route_resolver
+        self._playlist_route_recorder = playlist_route_recorder
 
     def upload_video(self, metadata: VideoMetadataInput, composed: ComposedMetadata) -> UploadResult:
         try:
@@ -229,7 +239,13 @@ class YouTubeUploadService:
             raise UploadError("YouTube API から動画 ID を取得できませんでした。")
 
         playlist_ids: dict[str, str] = {}
-        for playlist_name in composed.playlists:
+        source_playlists = list(composed.playlists)
+        effective_playlists = [
+            self._resolve_playlist_route(playlist_name) or playlist_name
+            for playlist_name in source_playlists
+        ]
+        composed.playlists = effective_playlists
+        for index, (source_playlist_name, playlist_name) in enumerate(zip(source_playlists, effective_playlists)):
             if self._playlist_api_blocked:
                 break
             try:
@@ -237,6 +253,15 @@ class YouTubeUploadService:
                 self.attach_video_to_playlist(video_id, playlist_id)
                 playlist_ids[playlist_name] = playlist_id
             except YouTubeApiError as exc:
+                if _is_playlist_full_error(exc) and source_playlist_name in {"Insta360", "HoverX1"}:
+                    rollover_name, rollover_id = self._attach_to_rollover_playlist(
+                        video_id=video_id,
+                        source_playlist_name=source_playlist_name,
+                        privacy_status=metadata.playlist_privacy_status,
+                    )
+                    composed.playlists[index] = rollover_name
+                    playlist_ids[rollover_name] = rollover_id
+                    continue
                 if exc.category in {"quota", "rate_limit"}:
                     self._playlist_api_blocked = True
                     # Keep the upload successful and defer playlist assignment to a later retry.
@@ -253,6 +278,33 @@ class YouTubeUploadService:
             upload_status="success",
             playlist_ids=playlist_ids,
         )
+
+    def _resolve_playlist_route(self, source_playlist_name: str) -> str | None:
+        resolver = getattr(self, "_playlist_route_resolver", None)
+        return resolver(source_playlist_name) if resolver is not None else None
+
+    def _attach_to_rollover_playlist(
+        self,
+        *,
+        video_id: str,
+        source_playlist_name: str,
+        privacy_status: str,
+    ) -> tuple[str, str]:
+        suffix = 1
+        while True:
+            playlist_name = f"{source_playlist_name}-{suffix}"
+            playlist_id = self.ensure_playlist(playlist_name, privacy_status)
+            try:
+                self.attach_video_to_playlist(video_id, playlist_id)
+            except YouTubeApiError as exc:
+                if _is_playlist_full_error(exc):
+                    suffix += 1
+                    continue
+                raise
+            recorder = getattr(self, "_playlist_route_recorder", None)
+            if recorder is not None:
+                recorder(source_playlist_name, playlist_name)
+            return playlist_name, playlist_id
 
     def ensure_playlist(self, playlist_name: str, privacy_status: str) -> str:
         cached = self._playlist_cache.get(playlist_name)
@@ -435,22 +487,30 @@ class YouTubeUploadService:
     def _populate_playlist_cache(self) -> None:
         if self._playlist_cache_populated or self._playlist_api_blocked:
             return
-        try:
-            search_response = _execute_request(
-                self.youtube.playlists().list(part="snippet,status", mine=True, maxResults=50),
-                operation="playlists.list",
-                **_quota_logger_kwargs(getattr(self, "quota_logger", None)),
-            )
-        except YouTubeApiError as exc:
-            if exc.category in {"quota", "rate_limit"}:
-                self._playlist_api_blocked = True
-            raise
+        page_token: str | None = None
+        while True:
+            try:
+                request_args = {"part": "snippet,status", "mine": True, "maxResults": 50}
+                if page_token:
+                    request_args["pageToken"] = page_token
+                search_response = _execute_request(
+                    self.youtube.playlists().list(**request_args),
+                    operation="playlists.list",
+                    **_quota_logger_kwargs(getattr(self, "quota_logger", None)),
+                )
+            except YouTubeApiError as exc:
+                if exc.category in {"quota", "rate_limit"}:
+                    self._playlist_api_blocked = True
+                raise
 
-        for item in search_response.get("items", []):
-            title = item.get("snippet", {}).get("title")
-            playlist_id = item.get("id")
-            if title and playlist_id:
-                self._playlist_cache[str(title)] = str(playlist_id)
+            for item in search_response.get("items", []):
+                title = item.get("snippet", {}).get("title")
+                playlist_id = item.get("id")
+                if title and playlist_id:
+                    self._playlist_cache[str(title)] = str(playlist_id)
+            page_token = str(search_response.get("nextPageToken") or "") or None
+            if page_token is None:
+                break
         self._playlist_cache_populated = True
 
 
@@ -525,6 +585,10 @@ def _classify_youtube_error(exc: Exception, *, operation: str) -> YouTubeApiErro
             retryable = True
             suffix = f" 詳細: {detail}" if detail else ""
             message = f"YouTube API のレート制限です: {operation}. 少し待って再試行してください。{suffix}"
+        elif status_code in {403} and "playlistContainsMaximumNumberOfVideos" in reason:
+            category = "playlist_full"
+            suffix = f" 詳細: {detail}" if detail else ""
+            message = f"YouTube プレイリストの動画数上限です: {operation}.{suffix}"
         elif status_code in {403}:
             category = "permission"
             suffix = f" 詳細: {detail}" if detail else ""
@@ -570,3 +634,7 @@ def _classify_youtube_error(exc: Exception, *, operation: str) -> YouTubeApiErro
         retryable=retryable,
         reason=str(exc),
     )
+
+
+def _is_playlist_full_error(exc: YouTubeApiError) -> bool:
+    return exc.category == "playlist_full" or "playlistContainsMaximumNumberOfVideos" in exc.reason

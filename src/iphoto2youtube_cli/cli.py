@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -296,8 +297,6 @@ def _build_upload_parser(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="既存の成功済みアップロードが見つかってもスキップせず続行します。",
     )
-
-
 def _build_batch_upload_parser(subparsers: argparse._SubParsersAction) -> None:
     parser = subparsers.add_parser(
         "batch-upload",
@@ -331,6 +330,8 @@ def _build_batch_upload_parser(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="既存の成功済みアップロードが見つかってもスキップせず続行します。",
     )
+    parser.add_argument("--stop-db", help="LVU Autopilot の停止要求を読む SQLite 台帳")
+    parser.add_argument("--run-id", help="停止要求を照合する実行 ID")
     parser.add_argument(
         "--output",
         choices=["table", "json"],
@@ -457,12 +458,26 @@ def main(argv: list[str] | None = None) -> int:
                 _validate_expected_channel(args, channel)
                 _confirm_batch_upload_target(channel, items, assume_yes=args.yes)
             ledger_csv = Path(args.ledger_csv).expanduser() if args.ledger_csv else None
+            def should_stop() -> bool:
+                if not args.stop_db or not args.run_id:
+                    return False
+                try:
+                    with sqlite3.connect(Path(args.stop_db).expanduser()) as db:
+                        row = db.execute(
+                            "SELECT stop_requested_at FROM autopilot_runtime WHERE id=1 AND run_id=?",
+                            (args.run_id,),
+                        ).fetchone()
+                    return bool(row and row[0])
+                except sqlite3.Error:
+                    # A temporary lock must not turn into an unsafe forced stop.
+                    return False
             result = app.batch_upload(
                 items,
                 dry_run=args.dry_run,
                 ledger_csv_path=ledger_csv,
                 allow_duplicate=args.allow_duplicate,
                 progress_callback=_emit_progress_event,
+                should_stop=should_stop,
             )
         else:
             parser.error(f"未対応コマンドです: {args.command}")
