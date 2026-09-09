@@ -9,9 +9,9 @@ description = "Python CLI MVP scaffold for private YouTube uploads with metadata
 readme = "docs/python-cli-mvp-task-list.md"
 requires-python = ">=3.11"
 dependencies = [
-  "google-api-python-client>=2.170.0",
-  "google-auth-httplib2>=0.2.0",
-  "google-auth-oauthlib>=1.2.0",
+  "google-api-python-client>=2.200.0",
+  "google-auth-httplib2>=0.4.2",
+  "google-auth-oauthlib>=1.4.1",
 ]
 
 [project.scripts]
