@@ -440,13 +440,13 @@ struct ContentView: View {
                 alignment: .leading,
                 spacing: 12
             ) {
-                Button("Photo Auto") {
-                    viewModel.requestPhotoLibraryAutoWorkflow()
+                Button("Photo Workflow") {
+                    viewModel.requestPhotoLibraryWorkflow()
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(
                     viewModel.isPhotoLibraryBusy ||
-                    viewModel.isPhotoLibraryAutoRunning ||
+                    viewModel.isPhotoLibraryWorkflowRunning ||
                     viewModel.photoLibraryVideos.isEmpty
                 )
 
@@ -455,7 +455,7 @@ struct ContentView: View {
                 }
                 .disabled(
                     viewModel.isPhotoLibraryBusy ||
-                    viewModel.isPhotoLibraryAutoRunning ||
+                    viewModel.isPhotoLibraryWorkflowRunning ||
                     viewModel.photoLibraryVideos.isEmpty
                 )
 
@@ -468,7 +468,7 @@ struct ContentView: View {
                 }
                 .disabled(
                     viewModel.isPhotoLibraryBusy ||
-                    viewModel.isPhotoLibraryAutoRunning ||
+                    viewModel.isPhotoLibraryWorkflowRunning ||
                     viewModel.photoLibraryVideos.isEmpty
                 )
 
@@ -477,7 +477,7 @@ struct ContentView: View {
                 }
                 .disabled(
                     viewModel.isPhotoLibraryBusy ||
-                    viewModel.isPhotoLibraryAutoRunning ||
+                    viewModel.isPhotoLibraryWorkflowRunning ||
                     viewModel.photoLibraryVideos.isEmpty
                 )
 
@@ -490,7 +490,7 @@ struct ContentView: View {
                 }
                 .disabled(
                     viewModel.isPhotoLibraryBusy ||
-                    viewModel.isPhotoLibraryAutoRunning ||
+                    viewModel.isPhotoLibraryWorkflowRunning ||
                     viewModel.photoLibraryVideos.isEmpty
                 )
 
@@ -499,7 +499,7 @@ struct ContentView: View {
                 }
                 .disabled(
                     viewModel.isPhotoLibraryBusy ||
-                    viewModel.isPhotoLibraryAutoRunning ||
+                    viewModel.isPhotoLibraryWorkflowRunning ||
                     viewModel.photoLibraryVideos.isEmpty
                 )
 
@@ -508,7 +508,7 @@ struct ContentView: View {
                 }
                 .disabled(
                     viewModel.isPhotoLibraryBusy ||
-                    viewModel.isPhotoLibraryAutoRunning ||
+                    viewModel.isPhotoLibraryWorkflowRunning ||
                     viewModel.photoLibraryVideos.isEmpty
                 )
 
@@ -517,7 +517,7 @@ struct ContentView: View {
                 }
                 .disabled(
                     viewModel.isPhotoLibraryBusy ||
-                    viewModel.isPhotoLibraryAutoRunning ||
+                    viewModel.isPhotoLibraryWorkflowRunning ||
                     viewModel.selectedPhotoLibraryVideoIDs.isEmpty
                 )
 
@@ -532,7 +532,7 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(
                     viewModel.isPhotoLibraryBusy ||
-                    viewModel.isPhotoLibraryAutoRunning ||
+                    viewModel.isPhotoLibraryWorkflowRunning ||
                     viewModel.selectedPhotoLibraryVideoIDs.isEmpty
                 )
             }
@@ -564,19 +564,19 @@ struct ContentView: View {
             }
             .alert(item: $viewModel.photoLibraryAlertState) { state in
                 switch state {
-                case .autoConfirmation(let confirmation):
+                case .workflowConfirmation(let confirmation):
                     Alert(
                         title: Text(confirmation.title),
                         message: Text(confirmation.message),
                         primaryButton: .default(Text("Run")) {
                             viewModel.photoLibraryAlertState = nil
-                            Task { await viewModel.runPhotoLibraryAutoWorkflow() }
+                            Task { await viewModel.runPhotoLibraryWorkflow() }
                         },
                         secondaryButton: .cancel {
                             viewModel.photoLibraryAlertState = nil
                         }
                     )
-                case .autoBlocked(let blocked):
+                case .workflowBlocked(let blocked):
                     Alert(
                         title: Text(blocked.title),
                         message: Text(blocked.message),

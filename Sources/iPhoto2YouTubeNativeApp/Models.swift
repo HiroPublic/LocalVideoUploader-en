@@ -128,13 +128,13 @@ struct UploadConfirmationState: Equatable, Identifiable {
     var message: String
 }
 
-struct PhotoLibraryAutoConfirmationState: Equatable, Identifiable {
+struct PhotoLibraryWorkflowConfirmationState: Equatable, Identifiable {
     var id: String { title + "\n" + message }
     var title: String
     var message: String
 }
 
-struct PhotoLibraryAutoBlockedState: Equatable, Identifiable {
+struct PhotoLibraryWorkflowBlockedState: Equatable, Identifiable {
     var id: String { title + "\n" + message }
     var title: String
     var message: String
@@ -147,15 +147,15 @@ struct PhotoLibraryCacheDeletionConfirmationState: Equatable, Identifiable {
 }
 
 enum PhotoLibraryAlertState: Identifiable, Equatable {
-    case autoConfirmation(PhotoLibraryAutoConfirmationState)
-    case autoBlocked(PhotoLibraryAutoBlockedState)
+    case workflowConfirmation(PhotoLibraryWorkflowConfirmationState)
+    case workflowBlocked(PhotoLibraryWorkflowBlockedState)
     case cacheDeletion(PhotoLibraryCacheDeletionConfirmationState)
 
     var id: String {
         switch self {
-        case .autoConfirmation(let state):
+        case .workflowConfirmation(let state):
             return "auto-confirmation:\(state.id)"
-        case .autoBlocked(let state):
+        case .workflowBlocked(let state):
             return "auto-blocked:\(state.id)"
         case .cacheDeletion(let state):
             return "cache-deletion:\(state.id)"

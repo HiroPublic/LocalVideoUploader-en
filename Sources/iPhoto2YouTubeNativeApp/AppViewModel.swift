@@ -22,7 +22,7 @@ final class AppViewModel: ObservableObject {
     @Published var photoDeletionHistoryEntries: [PhotoDeletionHistoryEntry]
     @Published var photoLibraryAuthorizationStatus: PhotoLibraryAuthorizationStatus
     @Published var isPhotoLibraryBusy: Bool
-    @Published var isPhotoLibraryAutoRunning: Bool
+    @Published var isPhotoLibraryWorkflowRunning: Bool
     @Published var selectedPhotoLibraryDate: Date
     @Published var photoLibraryVideos: [PhotoLibraryVideoItem]
     @Published var photoLibraryFetchFailureCount: Int
@@ -86,7 +86,7 @@ final class AppViewModel: ObservableObject {
         self.photoDeletionHistoryEntries = []
         self.photoLibraryAuthorizationStatus = .unknown
         self.isPhotoLibraryBusy = false
-        self.isPhotoLibraryAutoRunning = false
+        self.isPhotoLibraryWorkflowRunning = false
         self.selectedPhotoLibraryDate = Date()
         self.photoLibraryVideos = []
         self.photoLibraryFetchFailureCount = 0
@@ -687,7 +687,7 @@ final class AppViewModel: ObservableObject {
     }
 
     var canClearPhotoLibraryCache: Bool {
-        !isRunning && !isPhotoLibraryBusy && !isPhotoLibraryAutoRunning && drafts.isEmpty
+        !isRunning && !isPhotoLibraryBusy && !isPhotoLibraryWorkflowRunning && drafts.isEmpty
     }
 
     func refreshPhotoLibraryCacheStatus() {
@@ -735,32 +735,32 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func requestPhotoLibraryAutoWorkflow() {
-        guard validatePhotoLibraryAutoWorkflowPreconditions() else {
-            photoLibraryAlertState = .autoBlocked(
-                PhotoLibraryAutoBlockedState(
-                    title: "Photo Auto Not Ready",
+    func requestPhotoLibraryWorkflow() {
+        guard validatePhotoLibraryWorkflowPreconditions() else {
+            photoLibraryAlertState = .workflowBlocked(
+                PhotoLibraryWorkflowBlockedState(
+                    title: "Photo Workflow Not Ready",
                     message: lastError
                 )
             )
             return
         }
 
-        photoLibraryAlertState = .autoConfirmation(
-            PhotoLibraryAutoConfirmationState(
-                title: "Run Photo Auto?",
-                message: buildPhotoLibraryAutoConfirmationMessage()
+        photoLibraryAlertState = .workflowConfirmation(
+            PhotoLibraryWorkflowConfirmationState(
+                title: "Run Photo Workflow?",
+                message: buildPhotoLibraryWorkflowConfirmationMessage()
             )
         )
     }
 
-    func runPhotoLibraryAutoWorkflow() async {
-        guard !isPhotoLibraryBusy, !isPhotoLibraryAutoRunning else { return }
+    func runPhotoLibraryWorkflow() async {
+        guard !isPhotoLibraryBusy, !isPhotoLibraryWorkflowRunning else { return }
 
         let originalScreen = currentScreen
-        isPhotoLibraryAutoRunning = true
+        isPhotoLibraryWorkflowRunning = true
         defer {
-            isPhotoLibraryAutoRunning = false
+            isPhotoLibraryWorkflowRunning = false
             currentScreen = .photos
             if originalScreen != .photos && uploadConfirmation == nil {
                 currentScreen = .photos
@@ -769,12 +769,12 @@ final class AppViewModel: ObservableObject {
 
         lastError = ""
 
-        guard validatePhotoLibraryAutoWorkflowPreconditions() else { return }
+        guard validatePhotoLibraryWorkflowPreconditions() else { return }
 
-        appendLog("Started Photo Auto.")
+        appendLog("Started Photo Workflow.")
 
         if containsPhotoLibraryVideos(matching: Self.isNumericMP4FileName(_:)) {
-            appendLog("Photo Auto: detected Vlog targets.")
+            appendLog("Photo Workflow: detected Vlog targets.")
             applyPhotoLibraryPreset(
                 matching: { item in Self.isNumericMP4FileName(item.fileName) },
                 cameraModel: "Vlog",
@@ -782,53 +782,53 @@ final class AppViewModel: ObservableObject {
                 presetName: "Vlog",
                 notFoundMessage: "No Vlog videos were found for Auto."
             )
-            guard handlePhotoLibraryAutoStepResult(stepName: "Upload Vlog") else { return }
+            guard handlePhotoLibraryWorkflowStepResult(stepName: "Upload Vlog") else { return }
             await runBatchUpload(dryRun: false)
-            guard handlePhotoLibraryAutoUploadResult(stepName: "Upload Vlog") else { return }
+            guard handlePhotoLibraryWorkflowUploadResult(stepName: "Upload Vlog") else { return }
             currentScreen = .photos
         }
 
         if containsPhotoLibraryVideos(matching: { $0.uppercased().hasPrefix("VID_") }) {
-            appendLog("Photo Auto: detected Insta360 targets.")
+            appendLog("Photo Workflow: detected Insta360 targets.")
             applyPhotoLibraryPreset(
                 fileNamePrefix: "VID_",
                 cameraModel: "Insta360",
                 playlistName: "Insta360",
                 updateSharedMetadata: false
             )
-            guard handlePhotoLibraryAutoStepResult(stepName: "Upload Insta360") else { return }
+            guard handlePhotoLibraryWorkflowStepResult(stepName: "Upload Insta360") else { return }
             await runBatchUpload(dryRun: false)
-            guard handlePhotoLibraryAutoUploadResult(stepName: "Upload Insta360") else { return }
+            guard handlePhotoLibraryWorkflowUploadResult(stepName: "Upload Insta360") else { return }
             currentScreen = .photos
 
             selectedPhotoLibraryVideoIDs.removeAll()
             selectPhotoLibraryVideos(fileNamePrefix: "VID_", label: "Insta360")
-            guard handlePhotoLibraryAutoStepResult(stepName: "Check Insta360") else { return }
+            guard handlePhotoLibraryWorkflowStepResult(stepName: "Check Insta360") else { return }
             await deleteSelectedPhotoLibraryVideos()
-            guard handlePhotoLibraryAutoStepResult(stepName: "Delete selected Insta360 videos from iPhoto") else { return }
+            guard handlePhotoLibraryWorkflowStepResult(stepName: "Delete selected Insta360 videos from iPhoto") else { return }
         }
 
         if containsPhotoLibraryVideos(matching: { $0.uppercased().hasPrefix("HOVER_") }) {
-            appendLog("Photo Auto: detected HoverX1 targets.")
+            appendLog("Photo Workflow: detected HoverX1 targets.")
             applyPhotoLibraryPreset(
                 fileNamePrefix: "HOVER_",
                 cameraModel: "HoverX1",
                 playlistName: "HoverX1",
                 updateSharedMetadata: false
             )
-            guard handlePhotoLibraryAutoStepResult(stepName: "Upload HoverX1") else { return }
+            guard handlePhotoLibraryWorkflowStepResult(stepName: "Upload HoverX1") else { return }
             await runBatchUpload(dryRun: false)
-            guard handlePhotoLibraryAutoUploadResult(stepName: "Upload HoverX1") else { return }
+            guard handlePhotoLibraryWorkflowUploadResult(stepName: "Upload HoverX1") else { return }
             currentScreen = .photos
 
             selectedPhotoLibraryVideoIDs.removeAll()
             selectPhotoLibraryVideos(fileNamePrefix: "HOVER_", label: "HoverX1")
-            guard handlePhotoLibraryAutoStepResult(stepName: "Check HoverX1") else { return }
+            guard handlePhotoLibraryWorkflowStepResult(stepName: "Check HoverX1") else { return }
             await deleteSelectedPhotoLibraryVideos()
-            guard handlePhotoLibraryAutoStepResult(stepName: "Delete selected HoverX1 videos from iPhoto") else { return }
+            guard handlePhotoLibraryWorkflowStepResult(stepName: "Delete selected HoverX1 videos from iPhoto") else { return }
         }
 
-        appendLog("Completed Photo Auto.")
+        appendLog("Completed Photo Workflow.")
     }
 
     func addSelectedPhotoLibraryVideosToDrafts() {
@@ -851,10 +851,10 @@ final class AppViewModel: ObservableObject {
         appendLog("Checked videos matching \(label): \(matchedIDs.count) item(s)")
     }
 
-    private func validatePhotoLibraryAutoWorkflowPreconditions() -> Bool {
+    private func validatePhotoLibraryWorkflowPreconditions() -> Bool {
         guard !photoLibraryVideos.isEmpty else {
             lastError = "Photo library videos have not been loaded. Select a date and click Load."
-            appendLog("Photo Auto aborted: \(lastError)")
+            appendLog("Photo Workflow aborted: \(lastError)")
             return false
         }
 
@@ -864,33 +864,33 @@ final class AppViewModel: ObservableObject {
             ("Playlist", commonMetadata.playlistsText),
         ]
         if let missing = importantFields.first(where: { $0.1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-            lastError = "Enter the required field \"\(missing.0)\" on the left before running Photo Auto."
-            appendLog("Photo Auto aborted: \(lastError)")
+            lastError = "Enter the required field \"\(missing.0)\" on the left before running Photo Workflow."
+            appendLog("Photo Workflow aborted: \(lastError)")
             return false
         }
 
         guard drafts.isEmpty else {
-            lastError = "Clear any pending videos from the Upload screen before running Photo Auto."
-            appendLog("Photo Auto aborted: \(lastError)")
+            lastError = "Clear any pending videos from the Upload screen before running Photo Workflow."
+            appendLog("Photo Workflow aborted: \(lastError)")
             return false
         }
 
         return true
     }
 
-    private func handlePhotoLibraryAutoStepResult(stepName: String) -> Bool {
+    private func handlePhotoLibraryWorkflowStepResult(stepName: String) -> Bool {
         guard lastError.isEmpty else {
-            appendLog("Photo Auto aborted: \(stepName) / \(lastError)")
+            appendLog("Photo Workflow aborted: \(stepName) / \(lastError)")
             return false
         }
         return true
     }
 
-    private func handlePhotoLibraryAutoUploadResult(stepName: String) -> Bool {
-        guard handlePhotoLibraryAutoStepResult(stepName: stepName) else { return false }
+    private func handlePhotoLibraryWorkflowUploadResult(stepName: String) -> Bool {
+        guard handlePhotoLibraryWorkflowStepResult(stepName: stepName) else { return false }
         if !drafts.isEmpty {
             lastError = "Pending videos remain after \(stepName)."
-            appendLog("Photo Auto aborted: \(stepName) / \(lastError)")
+            appendLog("Photo Workflow aborted: \(stepName) / \(lastError)")
             return false
         }
         return true
@@ -900,7 +900,7 @@ final class AppViewModel: ObservableObject {
         photoLibraryVideos.contains { matcher($0.fileName) }
     }
 
-    private func buildPhotoLibraryAutoConfirmationMessage() -> String {
+    private func buildPhotoLibraryWorkflowConfirmationMessage() -> String {
         let dateText = Self.selectedDateFormatter.string(from: selectedPhotoLibraryDate)
         let videoCount = photoLibraryVideos.count
         let detectedSteps = [

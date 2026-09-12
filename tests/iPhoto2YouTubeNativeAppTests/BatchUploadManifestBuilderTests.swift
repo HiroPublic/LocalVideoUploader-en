@@ -756,7 +756,7 @@ final class BatchUploadManifestBuilderTests: XCTestCase {
     }
 
     @MainActor
-    func testPhotoLibraryAutoWorkflowRunsStepsInOrder() async {
+    func testPhotoLibraryWorkflowRunsStepsInOrder() async {
         let service = MockPhotoLibraryService()
         let cliService = MockCLIService()
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -809,18 +809,18 @@ final class BatchUploadManifestBuilderTests: XCTestCase {
             makeBatchUploadResponse(path: hover.filePath, title: "hover"),
         ]
 
-        await viewModel.runPhotoLibraryAutoWorkflow()
+        await viewModel.runPhotoLibraryWorkflow()
 
         XCTAssertEqual(cliService.batchUploadCallCount, 3)
         XCTAssertTrue(viewModel.drafts.isEmpty)
         XCTAssertEqual(service.deletedIDs, [["insta"], ["hover"]])
         XCTAssertEqual(viewModel.photoLibraryVideos.map(\.id), ["vlog"])
         XCTAssertTrue(viewModel.lastError.isEmpty)
-        XCTAssertFalse(viewModel.isPhotoLibraryAutoRunning)
+        XCTAssertFalse(viewModel.isPhotoLibraryWorkflowRunning)
         XCTAssertEqual(viewModel.uploadedVideos.map(\.filePath), [hover.filePath, insta.filePath, vlog.filePath])
         XCTAssertEqual(cliService.verifyUploadCallCount, 0)
-        XCTAssertTrue(viewModel.logOutput.contains("Started Photo Auto."))
-        XCTAssertTrue(viewModel.logOutput.contains("Completed Photo Auto."))
+        XCTAssertTrue(viewModel.logOutput.contains("Started Photo Workflow."))
+        XCTAssertTrue(viewModel.logOutput.contains("Completed Photo Workflow."))
     }
 
     @MainActor
@@ -976,7 +976,7 @@ final class BatchUploadManifestBuilderTests: XCTestCase {
     }
 
     @MainActor
-    func testRequestPhotoLibraryAutoWorkflowShowsConfirmation() {
+    func testRequestPhotoLibraryWorkflowShowsConfirmation() {
         let viewModel = AppViewModel(cliService: MockCLIService(), photoLibraryService: MockPhotoLibraryService())
         viewModel.commonMetadata.place = "砧公園"
         viewModel.commonMetadata.eventName = "花見"
@@ -994,19 +994,19 @@ final class BatchUploadManifestBuilderTests: XCTestCase {
             )
         ]
 
-        viewModel.requestPhotoLibraryAutoWorkflow()
+        viewModel.requestPhotoLibraryWorkflow()
 
-        guard case .autoConfirmation(let confirmation) = viewModel.photoLibraryAlertState else {
-            return XCTFail("Expected photo auto confirmation alert state")
+        guard case .workflowConfirmation(let confirmation) = viewModel.photoLibraryAlertState else {
+            return XCTFail("Expected photo workflow confirmation alert state")
         }
-        XCTAssertEqual(confirmation.title, "Run Photo Auto?")
+        XCTAssertEqual(confirmation.title, "Run Photo Workflow?")
         XCTAssertTrue(confirmation.message.contains("Capture date: 2026-04-07"))
         XCTAssertTrue(confirmation.message.contains("Upload Vlog (.mp4)"))
         XCTAssertTrue(confirmation.message.contains("If an error occurs, the workflow stops at that point."))
     }
 
     @MainActor
-    func testRequestPhotoLibraryAutoWorkflowWithoutRequiredMetadataDoesNotShowConfirmation() {
+    func testRequestPhotoLibraryWorkflowWithoutRequiredMetadataDoesNotShowConfirmation() {
         let viewModel = AppViewModel(cliService: MockCLIService(), photoLibraryService: MockPhotoLibraryService())
         viewModel.photoLibraryVideos = [
             PhotoLibraryVideoItem(
@@ -1020,18 +1020,18 @@ final class BatchUploadManifestBuilderTests: XCTestCase {
             )
         ]
 
-        viewModel.requestPhotoLibraryAutoWorkflow()
+        viewModel.requestPhotoLibraryWorkflow()
 
-        guard case .autoBlocked(let blocked) = viewModel.photoLibraryAlertState else {
-            return XCTFail("Expected blocked photo auto alert state")
+        guard case .workflowBlocked(let blocked) = viewModel.photoLibraryAlertState else {
+            return XCTFail("Expected blocked photo workflow alert state")
         }
-        XCTAssertEqual(blocked.title, "Photo Auto Not Ready")
+        XCTAssertEqual(blocked.title, "Photo Workflow Not Ready")
         XCTAssertTrue(blocked.message.contains("Enter the required field \"Location\""))
-        XCTAssertEqual(viewModel.lastError, "Enter the required field \"Location\" on the left before running Photo Auto.")
+        XCTAssertEqual(viewModel.lastError, "Enter the required field \"Location\" on the left before running Photo Workflow.")
     }
 
     @MainActor
-    func testPhotoLibraryAutoWorkflowTreatsNumericMp4AsVlogCandidate() async {
+    func testPhotoLibraryWorkflowTreatsNumericMp4AsVlogCandidate() async {
         let service = MockPhotoLibraryService()
         let cliService = MockCLIService()
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -1060,16 +1060,16 @@ final class BatchUploadManifestBuilderTests: XCTestCase {
             makeBatchUploadResponse(path: "/tmp/12345.mp4", title: "vlog")
         ]
 
-        await viewModel.runPhotoLibraryAutoWorkflow()
+        await viewModel.runPhotoLibraryWorkflow()
 
         XCTAssertEqual(cliService.batchUploadCallCount, 1)
         XCTAssertTrue(viewModel.drafts.isEmpty)
         XCTAssertTrue(viewModel.lastError.isEmpty)
-        XCTAssertTrue(viewModel.logOutput.contains("Photo Auto: detected Vlog targets."))
+        XCTAssertTrue(viewModel.logOutput.contains("Photo Workflow: detected Vlog targets."))
     }
 
     @MainActor
-    func testPhotoLibraryAutoWorkflowDoesNotTreatNumericMovAsVlogCandidate() async {
+    func testPhotoLibraryWorkflowDoesNotTreatNumericMovAsVlogCandidate() async {
         let service = MockPhotoLibraryService()
         let cliService = MockCLIService()
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -1095,20 +1095,20 @@ final class BatchUploadManifestBuilderTests: XCTestCase {
             )
         ]
 
-        viewModel.requestPhotoLibraryAutoWorkflow()
-        await viewModel.runPhotoLibraryAutoWorkflow()
+        viewModel.requestPhotoLibraryWorkflow()
+        await viewModel.runPhotoLibraryWorkflow()
 
-        if case .autoConfirmation(let confirmation) = viewModel.photoLibraryAlertState {
+        if case .workflowConfirmation(let confirmation) = viewModel.photoLibraryAlertState {
             XCTAssertFalse(confirmation.message.contains("Upload Vlog (.mp4)"))
         }
         XCTAssertEqual(cliService.batchUploadCallCount, 0)
         XCTAssertTrue(viewModel.drafts.isEmpty)
         XCTAssertTrue(viewModel.lastError.isEmpty)
-        XCTAssertFalse(viewModel.logOutput.contains("Photo Auto: detected Vlog targets."))
+        XCTAssertFalse(viewModel.logOutput.contains("Photo Workflow: detected Vlog targets."))
     }
 
     @MainActor
-    func testPhotoLibraryAutoWorkflowStopsAtFirstError() async {
+    func testPhotoLibraryWorkflowStopsAtFirstError() async {
         let service = MockPhotoLibraryService()
         let cliService = MockCLIService()
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -1147,18 +1147,18 @@ final class BatchUploadManifestBuilderTests: XCTestCase {
             makeFailedBatchUploadResponse(path: "/tmp/12345.mp4", title: "vlog"),
         ]
 
-        await viewModel.runPhotoLibraryAutoWorkflow()
+        await viewModel.runPhotoLibraryWorkflow()
 
         XCTAssertEqual(viewModel.drafts.map(\.filePath), ["/tmp/12345.mp4"])
         XCTAssertEqual(cliService.batchUploadCallCount, 1)
         XCTAssertEqual(service.deletedIDs, [])
         XCTAssertEqual(viewModel.lastError, "upload failed")
-        XCTAssertTrue(viewModel.logOutput.contains("Photo Auto aborted: Upload Vlog"))
-        XCTAssertFalse(viewModel.isPhotoLibraryAutoRunning)
+        XCTAssertTrue(viewModel.logOutput.contains("Photo Workflow aborted: Upload Vlog"))
+        XCTAssertFalse(viewModel.isPhotoLibraryWorkflowRunning)
     }
 
     @MainActor
-    func testPhotoLibraryAutoWorkflowKeepsSharedPlaylistWhenInsta360Runs() async {
+    func testPhotoLibraryWorkflowKeepsSharedPlaylistWhenInsta360Runs() async {
         let service = MockPhotoLibraryService()
         let cliService = MockCLIService()
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -1188,7 +1188,7 @@ final class BatchUploadManifestBuilderTests: XCTestCase {
         ]
         service.fetchedVideos = []
 
-        await viewModel.runPhotoLibraryAutoWorkflow()
+        await viewModel.runPhotoLibraryWorkflow()
 
         XCTAssertEqual(viewModel.commonMetadata.playlistsText, "[散歩] 自宅_花見")
         XCTAssertEqual(cliService.batchUploadCallCount, 1)
